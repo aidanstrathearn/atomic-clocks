@@ -10,6 +10,10 @@ pub struct Hamiltonian {
 }
 
 impl Hamiltonian {
+    pub fn new(hx: f64, hy: f64, hz: f64) -> Self {
+        Self { hx, hy, hz }
+    }
+
     pub fn norm(&self) -> f64 {
         (self.hx * self.hx + self.hy * self.hy + self.hz * self.hz).sqrt()
     }
@@ -28,31 +32,11 @@ pub struct GaussianPulse {
 
 impl TimeDependentHamiltonian for GaussianPulse {
     fn h(&self, t: f64) -> Hamiltonian {
-        Hamiltonian {
-            hx: self.pulse_area * normalised_gaussian(t, self.center, self.width),
-            hy: 0.0,
-            hz: self.detuning,
-        }
-    }
-}
-
-pub struct Ramsey {
-    pub(crate) pulse_area: f64,
-    pub(crate) detuning: f64,
-    pub(crate) pulse_width: f64,
-    pub(crate) pulse_separation: f64,
-}
-
-impl TimeDependentHamiltonian for Ramsey {
-    fn h(&self, t: f64) -> Hamiltonian {
-        let hx = self.pulse_area
-            * (normalised_gaussian(t, 0.0, self.pulse_width)
-                + normalised_gaussian(t, self.pulse_separation, self.pulse_width));
-        Hamiltonian {
-            hx,
-            hy: 0.0,
-            hz: self.detuning,
-        }
+        Hamiltonian::new(
+            self.pulse_area * normalised_gaussian(t, self.center, self.width),
+            0.0,
+            self.detuning,
+        )
     }
 }
 
