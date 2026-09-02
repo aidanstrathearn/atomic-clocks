@@ -1,0 +1,8 @@
+[package]
+name = "atomic-clocks"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+myplotlib = { path = "../myplotlib" }
+num-complex = "0.4.6"
