@@ -11,6 +11,71 @@ use crate::maths::{Linspace, linspace};
 use crate::ramsey::{ModulatedRamsey, Ramsey};
 use crate::state::QubitState;
 
+struct Demodulation {
+    in_phase: f64,
+    quadrature: f64,
+}
+
+impl Demodulation {
+    fn at_phase(&self, phase_offset: f64) -> f64 {
+        self.in_phase * phase_offset.cos() + self.quadrature * phase_offset.sin()
+    }
+}
+
+fn demodulate_measurements(
+    measurement_start_times: &[f64],
+    modulation_frequency: f64,
+    reference_time_offset: f64,
+    mut measure: impl FnMut(f64) -> f64,
+) -> Demodulation {
+    assert!(
+        measurement_start_times.len() >= 3,
+        "demodulation requires at least three measurements"
+    );
+
+    let samples: Vec<_> = measurement_start_times
+        .iter()
+        .map(|&start_time| {
+            let phase = modulation_frequency * (start_time + reference_time_offset);
+            let (reference_sin, reference_cos) = phase.sin_cos();
+            (measure(start_time), reference_sin, reference_cos)
+        })
+        .collect();
+
+    let sample_count = samples.len() as f64;
+    let mean_signal = samples.iter().map(|sample| sample.0).sum::<f64>() / sample_count;
+    let mean_sin = samples.iter().map(|sample| sample.1).sum::<f64>() / sample_count;
+    let mean_cos = samples.iter().map(|sample| sample.2).sum::<f64>() / sample_count;
+
+    let (sin_sin, sin_cos, cos_cos, signal_sin, signal_cos) = samples.iter().fold(
+        (0.0, 0.0, 0.0, 0.0, 0.0),
+        |(sin_sin, sin_cos, cos_cos, signal_sin, signal_cos), sample| {
+            let signal = sample.0 - mean_signal;
+            let reference_sin = sample.1 - mean_sin;
+            let reference_cos = sample.2 - mean_cos;
+
+            (
+                sin_sin + reference_sin * reference_sin,
+                sin_cos + reference_sin * reference_cos,
+                cos_cos + reference_cos * reference_cos,
+                signal_sin + signal * reference_sin,
+                signal_cos + signal * reference_cos,
+            )
+        },
+    );
+
+    let determinant = sin_sin * cos_cos - sin_cos * sin_cos;
+    assert!(
+        determinant.abs() > 1.0e-12,
+        "measurement phases do not span both demodulation quadratures"
+    );
+
+    Demodulation {
+        in_phase: (signal_sin * cos_cos - signal_cos * sin_cos) / determinant,
+        quadrature: (signal_cos * sin_sin - signal_sin * sin_cos) / determinant,
+    }
+}
+
 fn main() -> myplotlib::Result {
     let qubit = QubitState::ground();
     let times = Linspace::new(-1.0, 3.0, 1000);
@@ -32,10 +97,14 @@ fn main() -> myplotlib::Result {
         .ground_probability()
     };
 
+    /////////////////////////////////////////////////////////////////////////////////////
+
     let phase_difference: Vec<_> = detunings
         .iter()
         .map(|&detuning| ramsey_signal(detuning, -PI * 0.5) - ramsey_signal(detuning, PI * 0.5))
         .collect();
+
+    //////////////////////////////////////////////////////////////////////////////////////
 
     let fringe_width = 2.0 * PI / pulse_separation;
     let frequency_shift = fringe_width / 4.0;
@@ -47,12 +116,17 @@ fn main() -> myplotlib::Result {
         })
         .collect();
 
+    ////////////////////////////////////////////////////////////////////////////////
+
     let modulation_frequency = frequency_shift;
     let modulation_index = 0.05;
     let modulation_depth = modulation_index * modulation_frequency;
     let modulation_phase_samples = 128;
-    let modulation_phases: Vec<_> = (0..modulation_phase_samples)
-        .map(|index| 2.0 * PI * index as f64 / modulation_phase_samples as f64)
+    let measurement_start_times: Vec<_> = (0..modulation_phase_samples)
+        .map(|index| {
+            let phase = 2.0 * PI * index as f64 / modulation_phase_samples as f64;
+            phase / modulation_frequency - pulse_separation * 0.5
+        })
         .collect();
 
     let small_signal_gain = modulation_depth / modulation_frequency
@@ -60,10 +134,11 @@ fn main() -> myplotlib::Result {
     let modulated_difference: Vec<_> = detunings
         .iter()
         .map(|&detuning| {
-            let in_phase = modulation_phases
-                .iter()
-                .map(|&phase| {
-                    let start_time = phase / modulation_frequency - pulse_separation * 0.5;
+            let demodulation = demodulate_measurements(
+                &measurement_start_times,
+                modulation_frequency,
+                pulse_separation * 0.5,
+                |start_time| {
                     let probability = ModulatedRamsey {
                         pulse_area,
                         detuning,
@@ -76,15 +151,15 @@ fn main() -> myplotlib::Result {
                     .propagate_to_final(&qubit, &times)
                     .ground_probability();
 
-                    probability * phase.sin()
-                })
-                .sum::<f64>()
-                * 2.0
-                / modulation_phase_samples as f64;
+                    probability
+                },
+            );
 
-            in_phase / small_signal_gain
+            demodulation.at_phase(0.0) / small_signal_gain
         })
         .collect();
+
+    ///////////////////////////////////////////////////////////////////
 
     let phase_freq: Vec<_> = phase_difference
         .iter()
