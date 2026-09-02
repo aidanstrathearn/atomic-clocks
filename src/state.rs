@@ -82,24 +82,23 @@ impl QubitState {
     pub fn propagate(
         &self,
         hamiltonian: &impl TimeDependentHamiltonian,
-        times: Linspace,
-    ) -> (Vec<f64>, Vec<Self>) {
+        times: &Linspace,
+    ) -> Vec<Self> {
         let mut state = *self;
-        let states = times
+        times
             .array
             .iter()
             .map(|&t| {
                 state = state.ti_propagate(hamiltonian.h(t), times.step);
                 state
             })
-            .collect();
-        (times.array, states)
+            .collect()
     }
 
     pub fn propagate_to_final(
         &self,
         hamiltonian: &impl TimeDependentHamiltonian,
-        times: Linspace,
+        times: &Linspace,
     ) -> Self {
         let mut state = *self;
         for &t in &times.array {
@@ -111,9 +110,9 @@ impl QubitState {
     pub fn linear_response(
         &self,
         hamiltonian: &impl TimeDependentHamiltonian,
-        times: Linspace,
+        times: &Linspace,
         perturbation: Operator,
-    ) -> (Vec<f64>, Vec<f64>) {
+    ) -> Vec<f64> {
         let n = times.array.len();
         let mut trajectory = Vec::with_capacity(n);
         let mut forward = *self;
@@ -137,6 +136,6 @@ impl QubitState {
             future = future.multiply(step);
         }
 
-        (times.array, responses)
+        responses
     }
 }

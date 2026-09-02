@@ -6,7 +6,7 @@ use std::f64::consts::PI;
 
 use myplotlib::Plotter;
 
-use crate::maths::Linspace;
+use crate::maths::{Linspace, linspace};
 use crate::operator::{GaussianPulse, Operator, Ramsey};
 use crate::state::QubitState;
 
@@ -18,23 +18,45 @@ fn main() -> myplotlib::Result {
         detuning: 0.0,
     };
 
+    let mut ramsey = Ramsey {
+        pulse_area: 0.5 * PI,
+        detuning: 0.0,
+        pulse_width: 0.1,
+        pulse_separation: 2.0,
+    };
+
+    let qubit = QubitState::ground();
+    let times = Linspace::new(-1.0, 3.0, 1000);
+
     let mut plt = Plotter::new();
     for j in 0..5 {
-        let ramsey = Ramsey {
-            pulse_area: 0.5 * PI,
+        ramsey = Ramsey {
             detuning: 1.0 * j as f64,
-            pulse_width: 0.1,
-            pulse_separation: 2.0,
+            ..ramsey
         };
 
-        let times = Linspace::new(-1.0, 3.0, 1000);
-        let qubit = QubitState::ground();
-
-        // let (t, states) = qubit.propagate(&ramsey, times);
-        let (t, response) = qubit.linear_response(&ramsey, times, Operator::pauli_x());
-
-        plt.plot(&t, &response);
+        let response = qubit.linear_response(&ramsey, &times, Operator::pauli_x());
+        plt.plot(&times.array, &response);
     }
+    plt.show()?;
+
+    let times = Linspace::new(-1.0, 3.0, 1000);
+
+    let detunings = linspace(-35.0, 35.0, 1000);
+    let signal: Vec<_> = detunings
+        .iter()
+        .map(|&d| {
+            ramsey = Ramsey {
+                detuning: d,
+                ..ramsey
+            };
+            qubit
+                .propagate_to_final(&ramsey, &times)
+                .ground_probability()
+        })
+        .collect();
+    let mut plt = Plotter::new();
+    plt.plot(&detunings, &signal);
     plt.show()?;
     Ok(())
 }
