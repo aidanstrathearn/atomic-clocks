@@ -15,9 +15,9 @@ fn main() -> myplotlib::Result {
     let qubit = QubitState::ground();
     let times = Linspace::new(-1.0, 3.0, 1000);
     let pulse_separation = 2.0;
-    let pulse_width = 0.1;
+    let pulse_width = 0.05;
     let pulse_area = 0.5 * PI;
-    let detuning_lim = 25.0;
+    let detuning_lim = 25.0 * 0.2 / pulse_width;
     let detunings = linspace(-detuning_lim, detuning_lim, 1000);
 
     let ramsey_signal = |detuning, phase_diff| {
@@ -48,7 +48,7 @@ fn main() -> myplotlib::Result {
         .collect();
 
     let modulation_frequency = frequency_shift;
-    let modulation_index = 0.1;
+    let modulation_index = 0.05;
     let modulation_depth = modulation_index * modulation_frequency;
     let modulation_phase_samples = 128;
     let modulation_phases: Vec<_> = (0..modulation_phase_samples)
@@ -86,12 +86,26 @@ fn main() -> myplotlib::Result {
         })
         .collect();
 
+    let phase_freq: Vec<_> = phase_difference
+        .iter()
+        .zip(frequency_difference.iter())
+        .map(|(x, y)| x - y)
+        .collect();
+
+    let phase_mod: Vec<_> = phase_difference
+        .iter()
+        .zip(modulated_difference.iter())
+        .map(|(x, y)| x - y)
+        .collect();
+
     let mut plt = Plotter::new();
-    plt.plot(&detunings, &phase_difference).label("Phase shift");
-    plt.plot(&detunings, &frequency_difference)
-        .label("Frequency shift");
-    plt.plot(&detunings, &modulated_difference)
-        .label("Continuous FM demodulation");
+    // plt.plot(&detunings, &phase_difference).label("Phase shift");
+    // plt.plot(&detunings, &frequency_difference)
+    //     .label("Frequency shift");
+    // plt.plot(&detunings, &modulated_difference)
+    //     .label("Continuous FM demodulation");
+    plt.plot(&detunings, &phase_freq).label("Phase - freq");
+    plt.plot(&detunings, &phase_mod).label("Phase - mod");
     plt.xlabel("Detuning (rad / time)");
     plt.ylabel("Normalized differential ground-state probability");
     plt.show()?;
