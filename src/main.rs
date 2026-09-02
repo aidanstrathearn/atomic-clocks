@@ -5,7 +5,7 @@ mod state;
 
 use std::f64::consts::PI;
 
-use myplotlib::Plotter;
+use myplotlib::Figure;
 
 use crate::maths::{Linspace, linspace};
 use crate::ramsey::{ModulatedRamsey, Ramsey};
@@ -17,7 +17,7 @@ fn main() -> myplotlib::Result {
     let pulse_separation = 2.0;
     let pulse_width = 0.05;
     let pulse_area = 0.5 * PI;
-    let detuning_lim = 25.0 * 0.2 / pulse_width;
+    let detuning_lim = 20.0 * 0.2 / pulse_width;
     let detunings = linspace(-detuning_lim, detuning_lim, 1000);
 
     let ramsey_signal = |detuning, phase_diff| {
@@ -98,16 +98,34 @@ fn main() -> myplotlib::Result {
         .map(|(x, y)| x - y)
         .collect();
 
-    let mut plt = Plotter::new();
-    // plt.plot(&detunings, &phase_difference).label("Phase shift");
-    // plt.plot(&detunings, &frequency_difference)
-    //     .label("Frequency shift");
-    // plt.plot(&detunings, &modulated_difference)
-    //     .label("Continuous FM demodulation");
-    plt.plot(&detunings, &phase_freq).label("Phase - freq");
-    plt.plot(&detunings, &phase_mod).label("Phase - mod");
-    plt.xlabel("Detuning (rad / time)");
-    plt.ylabel("Normalized differential ground-state probability");
-    plt.show()?;
+    let mut figure = Figure::subplots(1, 2);
+    figure.suptitle("Ramsey demodulation comparison");
+
+    let raw_axes = figure.axes_mut(0, 0);
+    raw_axes
+        .plot(&detunings, &phase_difference)
+        .label("Phase shift");
+    raw_axes
+        .plot(&detunings, &frequency_difference)
+        .label("Frequency shift");
+    raw_axes
+        .plot(&detunings, &modulated_difference)
+        .label("Continuous FM demodulation");
+    raw_axes.title("Demodulated signals");
+    raw_axes.xlabel("Detuning (rad / time)");
+    raw_axes.ylabel("Normalized differential ground-state probability");
+
+    let difference_axes = figure.axes_mut(0, 1);
+    difference_axes
+        .plot(&detunings, &phase_freq)
+        .label("Phase - freq");
+    difference_axes
+        .plot(&detunings, &phase_mod)
+        .label("Phase - mod");
+    difference_axes.title("Differences from phase demodulation");
+    difference_axes.xlabel("Detuning (rad / time)");
+    difference_axes.ylabel("Residual ground-state probability");
+
+    figure.show()?;
     Ok(())
 }
