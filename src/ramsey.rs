@@ -1,5 +1,3 @@
-use std::f64::consts::PI;
-
 use crate::maths::{Linspace, normalised_gaussian};
 use crate::operator::{Hamiltonian, TimeDependentHamiltonian};
 use crate::state::QubitState;
@@ -44,16 +42,18 @@ pub struct ModulatedRamsey {
 impl TimeDependentHamiltonian for ModulatedRamsey {
     fn h(&self, t: f64) -> Hamiltonian {
         let hx = self.pulse_area
-            * (normalised_gaussian(t, self.start_time, self.pulse_width)
-                + normalised_gaussian(
-                    t,
-                    self.pulse_separation + self.start_time,
-                    self.pulse_width,
-                ));
+            * (normalised_gaussian(t, 0.0, self.pulse_width)
+                + normalised_gaussian(t, self.pulse_separation, self.pulse_width));
         Hamiltonian::new(
             hx,
             0.0,
-            self.detuning + self.mod_depth * (2.0 * PI * self.mod_freq * t).sin(),
+            self.detuning + self.mod_depth * (self.mod_freq * (t + self.start_time)).sin(),
         )
+    }
+}
+
+impl ModulatedRamsey {
+    pub fn propagate_to_final(&self, initial: &QubitState, times: &Linspace) -> QubitState {
+        initial.propagate_to_final(self, times)
     }
 }
