@@ -210,6 +210,25 @@ fn main() -> myplotlib::Result {
         })
         .collect();
 
+    let measurement_cycle_time = pulse_separation * 4.3;
+    let discrete_measurement_count = 128 * 2;
+    let discrete_measurement_start_times: Vec<_> = (0..discrete_measurement_count)
+        .map(|index| index as f64 * measurement_cycle_time)
+        .collect();
+    let sampled_modulated_difference_fitted: Vec<_> = detunings
+        .iter()
+        .map(|&detuning| {
+            let demodulation = demodulate_measurements_fitted(
+                &discrete_measurement_start_times,
+                modulation_frequency,
+                pulse_separation * 0.5,
+                |start_time| modulated_ramsey_signal(detuning, start_time),
+            );
+
+            demodulation.at_phase(0.0) / small_signal_gain
+        })
+        .collect();
+
     ///////////////////////////////////////////////////////////////////
 
     let phase_freq: Vec<_> = phase_difference
@@ -230,6 +249,12 @@ fn main() -> myplotlib::Result {
         .map(|(x, y)| x - y)
         .collect();
 
+    let phase_sampled_mod_fitted: Vec<_> = phase_difference
+        .iter()
+        .zip(sampled_modulated_difference_fitted.iter())
+        .map(|(x, y)| x - y)
+        .collect();
+
     let mut figure = Figure::subplots(1, 2);
     figure.suptitle("Ramsey demodulation comparison");
 
@@ -242,10 +267,13 @@ fn main() -> myplotlib::Result {
         .label("Frequency shift");
     raw_axes
         .plot(&detunings, &modulated_difference)
-        .label("Continuous FM demodulation");
+        .label("Continuous FM");
     raw_axes
         .plot(&detunings, &sampled_modulated_difference)
-        .label(format!("Sampled FM (T_c = {measurement_cycle_time})"));
+        .label(format!("Sampled FM - direct demod"));
+    raw_axes
+        .plot(&detunings, &sampled_modulated_difference_fitted)
+        .label(format!("Sampled FM - fitted demod"));
     raw_axes.title("Demodulated signals");
     raw_axes.xlabel("Detuning (rad / time)");
     raw_axes.ylabel("Normalized differential ground-state probability");
@@ -260,6 +288,9 @@ fn main() -> myplotlib::Result {
     difference_axes
         .plot(&detunings, &phase_sampled_mod)
         .label("Phase - sampled mod");
+    difference_axes
+        .plot(&detunings, &phase_sampled_mod_fitted)
+        .label("Phase - sampled mod + fitting");
     difference_axes.title("Differences from phase demodulation");
     difference_axes.xlabel("Detuning (rad / time)");
     difference_axes.ylabel("Residual ground-state probability");
