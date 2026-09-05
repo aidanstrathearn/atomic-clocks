@@ -1,7 +1,7 @@
 use num_complex::{Complex, Complex64};
 
+use super::operator::{Hamiltonian, Operator, TimeDependentHamiltonian};
 use crate::maths::Linspace;
-use crate::operator::{Hamiltonian, Operator, TimeDependentHamiltonian};
 
 #[derive(Copy, Clone)]
 pub struct QubitState {

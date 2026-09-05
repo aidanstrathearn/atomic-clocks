@@ -10,7 +10,7 @@ pub struct Linspace {
 }
 
 impl Linspace {
-    pub(crate) fn new(start: f64, stop: f64, nsteps: usize) -> Self {
+    pub fn new(start: f64, stop: f64, nsteps: usize) -> Self {
         let step: f64 = (stop - start) / (nsteps as f64);
         Self {
             step,

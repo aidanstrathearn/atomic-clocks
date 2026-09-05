@@ -1,13 +1,12 @@
 use crate::maths::{Linspace, normalised_gaussian};
-use crate::operator::{Hamiltonian, TimeDependentHamiltonian};
-use crate::state::QubitState;
+use crate::twolevel::{Hamiltonian, QubitState, TimeDependentHamiltonian};
 
 pub struct Ramsey {
-    pub(crate) pulse_area: f64,
-    pub(crate) detuning: f64,
-    pub(crate) pulse_width: f64,
-    pub(crate) pulse_separation: f64,
-    pub(crate) phase_diff: f64,
+    pub pulse_area: f64,
+    pub detuning: f64,
+    pub pulse_width: f64,
+    pub pulse_separation: f64,
+    pub phase_diff: f64,
 }
 
 impl Ramsey {
@@ -30,13 +29,13 @@ impl TimeDependentHamiltonian for Ramsey {
 }
 
 pub struct ModulatedRamsey {
-    pub(crate) pulse_area: f64,
-    pub(crate) detuning: f64,
-    pub(crate) mod_freq: f64,
-    pub(crate) mod_depth: f64,
-    pub(crate) start_time: f64,
-    pub(crate) pulse_width: f64,
-    pub(crate) pulse_separation: f64,
+    pub pulse_area: f64,
+    pub detuning: f64,
+    pub mod_freq: f64,
+    pub mod_depth: f64,
+    pub start_time: f64,
+    pub pulse_width: f64,
+    pub pulse_separation: f64,
 }
 
 impl TimeDependentHamiltonian for ModulatedRamsey {

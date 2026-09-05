@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-myplotlib = { git = "https://github.com/aidanstrathearn/myplotlib.git" }
 num-complex = "0.4.6"
+
+[dev-dependencies]
+myplotlib = { git = "https://github.com/aidanstrathearn/myplotlib.git" }

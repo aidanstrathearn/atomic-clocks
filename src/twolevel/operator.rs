@@ -24,10 +24,10 @@ pub trait TimeDependentHamiltonian {
 }
 
 pub struct GaussianPulse {
-    pub(crate) pulse_area: f64,
-    pub(crate) detuning: f64,
-    pub(crate) width: f64,
-    pub(crate) center: f64,
+    pub pulse_area: f64,
+    pub detuning: f64,
+    pub width: f64,
+    pub center: f64,
 }
 
 impl TimeDependentHamiltonian for GaussianPulse {
