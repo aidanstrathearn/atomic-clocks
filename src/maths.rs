@@ -4,6 +4,7 @@ pub fn normalised_gaussian(x: f64, mu: f64, sigma: f64) -> f64 {
     f64::exp(-0.5 * ((x - mu) / sigma).powi(2)) / (PI * 2.0).sqrt() / sigma
 }
 
+#[derive(Clone)]
 pub struct Linspace {
     pub step: f64,
     pub array: Vec<f64>,

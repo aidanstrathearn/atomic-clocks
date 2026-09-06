@@ -1,5 +1,5 @@
 use crate::maths::{Linspace, normalised_gaussian};
-use crate::twolevel::{Hamiltonian, QubitState, TimeDependentHamiltonian};
+use crate::twolevel::{Hamiltonian, QubitState, Solver, TimeDependentHamiltonian};
 
 pub struct Ramsey {
     pub pulse_area: f64,
@@ -11,7 +11,7 @@ pub struct Ramsey {
 
 impl Ramsey {
     pub fn propagate_to_final(&self, initial: &QubitState, times: &Linspace) -> QubitState {
-        initial.propagate_to_final(self, times)
+        Solver::from(self, times.clone()).propagate_to_final(*initial)
     }
 }
 
@@ -53,6 +53,6 @@ impl TimeDependentHamiltonian for ModulatedRamsey {
 
 impl ModulatedRamsey {
     pub fn propagate_to_final(&self, initial: &QubitState, times: &Linspace) -> QubitState {
-        initial.propagate_to_final(self, times)
+        Solver::from(self, times.clone()).propagate_to_final(*initial)
     }
 }

@@ -29,11 +29,6 @@ impl BlochVec {
         0.5 * (1.0 - self.r.z)
     }
 
-    pub fn ti_propagate(&self, hamiltonian: Hamiltonian, dt: f64) -> Self {
-        let prop = Unitary::from_hamiltonian(hamiltonian, dt);
-        prop.apply_to(*self)
-    }
-
 }
 
 #[derive(Copy, Clone)]
@@ -52,23 +47,6 @@ impl QubitState {
             ground: Complex64::new(1.0, 0.0),
             excited: Complex64::new(0.0, 0.0),
         }
-    }
-
-    pub fn ti_propagate(&self, hamiltonian: Hamiltonian, dt: f64) -> Self {
-        let prop = Operator::ti_propagator(hamiltonian, dt);
-        prop.apply_to(*self)
-    }
-
-    pub fn propagate_to_final(
-        &self,
-        hamiltonian: &impl TimeDependentHamiltonian,
-        times: &Linspace,
-    ) -> Self {
-        let mut state = *self;
-        for &t in &times.array {
-            state = state.ti_propagate(hamiltonian.h(t), times.step);
-        }
-        state
     }
 
     pub fn linear_response(
@@ -149,7 +127,7 @@ impl Solver {
         self.h_t
             .iter()
             .map(|&h| {
-                state = state.ti_propagate(h, self.times.step);
+                state = Operator::ti_propagator(h, self.times.step).apply_to(state);
                 state
             })
             .collect()
@@ -158,7 +136,7 @@ impl Solver {
     pub fn propagate_to_final(&self, initial: QubitState) -> QubitState {
         let mut state = initial;
         for &h in &self.h_t {
-            state = state.ti_propagate(h, self.times.step);
+            state = Operator::ti_propagator(h, self.times.step).apply_to(state);
         }
         state
     }
