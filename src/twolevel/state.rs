@@ -1,6 +1,6 @@
 use num_complex::{Complex, Complex64};
 
-use super::operator::{Hamiltonian, Operator, TimeDependentHamiltonian};
+use super::operator::{Hamiltonian, Operator, TimeDependentHamiltonian, commutator_norm};
 use crate::maths::Linspace;
 
 #[derive(Copy, Clone)]
@@ -53,12 +53,12 @@ impl QubitState {
         }
     }
 
-    pub fn add(&self, other: Self) -> Self {
-        Self {
-            ground: self.ground + other.ground,
-            excited: self.excited + other.excited,
-        }
-    }
+    // pub fn add(&self, other: Self) -> Self {
+    //     Self {
+    //         ground: self.ground + other.ground,
+    //         excited: self.excited + other.excited,
+    //     }
+    // }
 
     pub fn ground() -> Self {
         Self {
@@ -153,28 +153,31 @@ impl Solver {
         }
     }
 
-    pub fn commutator_norm(&self, h1: Hamiltonian, h2: Hamiltonian) -> f64 {
-        let h1h2 = h1.norm() * h2.norm();
-        let cos_theta = (h1.hx * h2.hx + h1.hy * h2.hy + h1.hz * h2.hz) / h1h2;
-        self.times.step * self.times.step * h1h2 * (1.0 - cos_theta * cos_theta).sqrt()
-    }
-
-    pub fn trotter_reduce(&mut self, tolerance: f64) {
+    pub fn trotter_reduce(&mut self, tolerance: f64) -> Vec<f64> {
         let mut new_h_t: Vec<Hamiltonian> = Vec::new();
+        let mut new_times: Vec<f64> = Vec::new();
         let mut current = self.h_t[0];
+        let mut current_t = self.times.array[0];
+        let tol = tolerance * 4.0 / self.times.array.len() as f64;
         for &h in &self.h_t[1..] {
-            if self.commutator_norm(h, current) < tolerance {
+            if self.times.step.powi(2) * commutator_norm(h, current) < tol {
                 current = Hamiltonian {
                     hx: current.hx + h.hx,
                     hy: current.hy + h.hy,
                     hz: current.hz + h.hz,
                 };
+                current_t += self.times.step;
             } else {
+                new_h_t.push(current);
+                new_times.push(current_t);
+                current = h;
+                current_t += self.times.step;
+            }
+        }
         new_h_t.push(current);
-                current = h
-        }}
-        new_h_t.push(current);
+        new_times.push(current_t);
         (*self).h_t = new_h_t;
+        new_times
     }
 
     pub fn propagate(&self, initial: QubitState) -> Vec<QubitState> {

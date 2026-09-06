@@ -17,6 +17,14 @@ impl Hamiltonian {
     pub fn norm(&self) -> f64 {
         (self.hx * self.hx + self.hy * self.hy + self.hz * self.hz).sqrt()
     }
+
+
+}
+
+pub fn commutator_norm(h1: Hamiltonian, h2: Hamiltonian) -> f64 {
+    let h1h2 = h1.norm() * h2.norm();
+    let cos_theta = (h1.hx * h2.hx + h1.hy * h2.hy + h1.hz * h2.hz) / h1h2;
+    h1h2 * (1.0 - cos_theta * cos_theta).sqrt()
 }
 
 pub trait TimeDependentHamiltonian {
