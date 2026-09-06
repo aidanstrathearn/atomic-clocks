@@ -1,7 +1,12 @@
-use num_complex::{Complex, Complex64};
+use num_complex::Complex64;
 
 use super::operator::{Hamiltonian, Operator, TimeDependentHamiltonian, commutator_norm};
 use crate::maths::Linspace;
+use crate::twolevel::Vec3;
+
+pub struct BlochVec {
+    pub r: Vec3,
+}
 
 #[derive(Copy, Clone)]
 pub struct QubitState {
@@ -18,27 +23,6 @@ impl QubitState {
         self.excited.norm_sqr()
     }
 
-    pub fn apply_pauli_x(&self) -> Self {
-        Self {
-            ground: self.excited,
-            excited: self.ground,
-        }
-    }
-
-    pub fn apply_pauli_y(&self) -> Self {
-        Self {
-            ground: self.excited * Complex::I,
-            excited: -self.ground * Complex::I,
-        }
-    }
-
-    pub fn apply_pauli_z(&self) -> Self {
-        Self {
-            ground: -self.ground,
-            excited: self.excited,
-        }
-    }
-
     pub fn scale_real(&self, scale: f64) -> Self {
         Self {
             ground: self.ground * scale,
@@ -53,13 +37,6 @@ impl QubitState {
         }
     }
 
-    // pub fn add(&self, other: Self) -> Self {
-    //     Self {
-    //         ground: self.ground + other.ground,
-    //         excited: self.excited + other.excited,
-    //     }
-    // }
-
     pub fn ground() -> Self {
         Self {
             ground: Complex64::new(1.0, 0.0),
@@ -67,16 +44,9 @@ impl QubitState {
         }
     }
 
-    pub fn apply_operator(&self, op: Operator) -> Self {
-        Self {
-            ground: op.gg * self.ground + op.ge * self.excited,
-            excited: op.eg * self.ground + op.ee * self.excited,
-        }
-    }
-
     pub fn ti_propagate(&self, hamiltonian: Hamiltonian, dt: f64) -> Self {
         let prop = Operator::ti_propagator(hamiltonian, dt);
-        self.apply_operator(prop)
+        prop.apply_to(*self)
     }
 
     pub fn propagate(
@@ -119,7 +89,7 @@ impl QubitState {
 
         for &t in &times.array {
             let step = Operator::ti_propagator(hamiltonian.h(t), times.step);
-            forward = forward.apply_operator(step);
+            forward = step.apply_to(forward);
             trajectory.push((step, forward));
         }
 
@@ -129,7 +99,7 @@ impl QubitState {
 
         for i in (0..n).rev() {
             let (step, forward_state) = trajectory[i];
-            let inserted = forward_state.apply_operator(perturbation);
+            let inserted = perturbation.apply_to(forward_state);
             let response_amplitude = future.gg * inserted.ground + future.ge * inserted.excited;
 
             responses[i] = 2.0 * (final_ground.conj() * response_amplitude).im;

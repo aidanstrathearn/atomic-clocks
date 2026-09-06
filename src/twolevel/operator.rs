@@ -1,14 +1,13 @@
 use num_complex::Complex64;
 
+use super::state::QubitState;
 use crate::vec3::Vec3;
 
 pub struct Unitary {
     pub r: Vec3,
 }
 
-pub struct BlochVec {
-    pub r: Vec3,
-}
+
 
 #[derive(Copy, Clone)]
 pub struct Hamiltonian {
@@ -50,6 +49,13 @@ pub struct Operator {
 }
 
 impl Operator {
+    pub fn apply_to(&self, state: QubitState) -> QubitState {
+        QubitState {
+            ground: self.gg * state.ground + self.ge * state.excited,
+            excited: self.eg * state.ground + self.ee * state.excited,
+        }
+    }
+
     pub fn identity() -> Self {
         Self {
             gg: Complex64::new(1.0, 0.0),
