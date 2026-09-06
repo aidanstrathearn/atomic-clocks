@@ -65,33 +65,6 @@ impl Operator {
         }
     }
 
-    pub fn pauli_x() -> Self {
-        Self {
-            gg: Complex64::new(0.0, 0.0),
-            eg: Complex64::new(1.0, 0.0),
-            ge: Complex64::new(1.0, 0.0),
-            ee: Complex64::new(0.0, 0.0),
-        }
-    }
-
-    pub fn pauli_y() -> Self {
-        Self {
-            gg: Complex64::new(0.0, 0.0),
-            eg: Complex64::new(0.0, -1.0),
-            ge: Complex64::new(0.0, 1.0),
-            ee: Complex64::new(0.0, 0.0),
-        }
-    }
-
-    pub fn pauli_z() -> Self {
-        Self {
-            gg: Complex64::new(-1.0, 0.0),
-            eg: Complex64::new(0.0, 0.0),
-            ge: Complex64::new(0.0, 0.0),
-            ee: Complex64::new(1.0, 0.0),
-        }
-    }
-
     pub fn ti_propagator(hamiltonian: Hamiltonian, dt: f64) -> Self {
         let norm = hamiltonian.norm();
         if norm == 0.0 {

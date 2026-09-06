@@ -8,6 +8,13 @@ pub struct BlochVec {
     pub r: Vec3,
 }
 
+impl BlochVec {
+    pub fn excited_probability(&self) -> f64 {
+        // The excited state lies at r.z = +1.
+        0.5 * (1.0 + self.r.z)
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct QubitState {
     pub ground: Complex64,
@@ -17,24 +24,6 @@ pub struct QubitState {
 impl QubitState {
     pub fn ground_probability(&self) -> f64 {
         self.ground.norm_sqr()
-    }
-
-    pub fn excited_probability(&self) -> f64 {
-        self.excited.norm_sqr()
-    }
-
-    pub fn scale_real(&self, scale: f64) -> Self {
-        Self {
-            ground: self.ground * scale,
-            excited: self.excited * scale,
-        }
-    }
-
-    pub fn scale_complex(&self, scale: Complex64) -> Self {
-        Self {
-            ground: self.ground * scale,
-            excited: self.excited * scale,
-        }
     }
 
     pub fn ground() -> Self {
@@ -47,22 +36,6 @@ impl QubitState {
     pub fn ti_propagate(&self, hamiltonian: Hamiltonian, dt: f64) -> Self {
         let prop = Operator::ti_propagator(hamiltonian, dt);
         prop.apply_to(*self)
-    }
-
-    pub fn propagate(
-        &self,
-        hamiltonian: &impl TimeDependentHamiltonian,
-        times: &Linspace,
-    ) -> Vec<Self> {
-        let mut state = *self;
-        times
-            .array
-            .iter()
-            .map(|&t| {
-                state = state.ti_propagate(hamiltonian.h(t), times.step);
-                state
-            })
-            .collect()
     }
 
     pub fn propagate_to_final(
