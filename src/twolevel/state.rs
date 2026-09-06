@@ -122,21 +122,21 @@ impl Solver {
         new_times
     }
 
-    pub fn propagate(&self, initial: QubitState) -> Vec<QubitState> {
+    pub fn propagate(&self, initial: BlochVec) -> Vec<BlochVec> {
         let mut state = initial;
         self.h_t
             .iter()
             .map(|&h| {
-                state = Operator::ti_propagator(h, self.times.step).apply_to(state);
+                state = Unitary::from_hamiltonian(h, self.times.step).apply_to(state);
                 state
             })
             .collect()
     }
 
-    pub fn propagate_to_final(&self, initial: QubitState) -> QubitState {
+    pub fn propagate_to_final(&self, initial: BlochVec) -> BlochVec {
         let mut state = initial;
         for &h in &self.h_t {
-            state = Operator::ti_propagator(h, self.times.step).apply_to(state);
+            state = Unitary::from_hamiltonian(h, self.times.step).apply_to(state);
         }
         state
     }

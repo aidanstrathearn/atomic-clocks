@@ -10,12 +10,20 @@ pub struct Unitary {
 
 impl Unitary {
     pub fn from_hamiltonian(hamiltonian: Hamiltonian, dt: f64) -> Self {
-        Self { r: hamiltonian.r * dt}
+        Self {
+            r: hamiltonian.r * dt,
+        }
     }
 
     pub fn apply_to(&self, bloch: BlochVec) -> BlochVec {
         let angle = self.r.norm();
-        BlochVec{ r: bloch.r.rotate(self.r, angle)}
+        if angle == 0.0 {
+            return bloch;
+        }
+        let axis = self.r * (1.0 / angle);
+        BlochVec {
+            r: bloch.r.rotate(axis, angle),
+        }
     }
 }
 
