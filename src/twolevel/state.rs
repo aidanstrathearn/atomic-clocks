@@ -1,18 +1,39 @@
 use num_complex::Complex64;
 
-use super::operator::{Hamiltonian, Operator, TimeDependentHamiltonian, commutator_norm};
+use super::operator::{commutator_norm, Hamiltonian, Operator, TimeDependentHamiltonian, Unitary};
 use crate::maths::Linspace;
 use crate::twolevel::Vec3;
 
+#[derive(Copy, Clone)]
 pub struct BlochVec {
     pub r: Vec3,
 }
 
 impl BlochVec {
+    pub fn ground() -> Self {
+        Self {
+            r: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
+        }
+    }
     pub fn excited_probability(&self) -> f64 {
         // The excited state lies at r.z = +1.
         0.5 * (1.0 + self.r.z)
     }
+
+    pub fn ground_probability(&self) -> f64 {
+        // The excited state lies at r.z = +1.
+        0.5 * (1.0 - self.r.z)
+    }
+
+    pub fn ti_propagate(&self, hamiltonian: Hamiltonian, dt: f64) -> Self {
+        let prop = Unitary::from_hamiltonian(hamiltonian, dt);
+        prop.apply_to(*self)
+    }
+
 }
 
 #[derive(Copy, Clone)]

@@ -1,10 +1,22 @@
 use num_complex::Complex64;
 
-use super::state::QubitState;
+use super::state::{BlochVec, QubitState};
 use crate::vec3::Vec3;
 
+#[derive(Copy, Clone)]
 pub struct Unitary {
     pub r: Vec3,
+}
+
+impl Unitary {
+    pub fn from_hamiltonian(hamiltonian: Hamiltonian, dt: f64) -> Self {
+        Self { r: hamiltonian.r * dt}
+    }
+
+    pub fn apply_to(&self, bloch: BlochVec) -> BlochVec {
+        let angle = self.r.norm();
+        BlochVec{ r: bloch.r.rotate(self.r, angle)}
+    }
 }
 
 
