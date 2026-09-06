@@ -139,3 +139,60 @@ impl QubitState {
         responses
     }
 }
+
+pub struct Solver {
+    pub h_t: Vec<Hamiltonian>,
+    times: Linspace,
+}
+
+impl Solver {
+    pub fn from(system: &impl TimeDependentHamiltonian, times: Linspace) -> Self {
+        Self {
+            h_t: times.array.iter().map(|&t| system.h(t)).collect(),
+            times,
+        }
+    }
+
+    pub fn commutator_norm(&self, h1: Hamiltonian, h2: Hamiltonian) -> f64 {
+        let h1h2 = h1.norm() * h2.norm();
+        let cos_theta = (h1.hx * h2.hx + h1.hy * h2.hy + h1.hz * h2.hz) / h1h2;
+        self.times.step * self.times.step * h1h2 * (1.0 - cos_theta * cos_theta).sqrt()
+    }
+
+    pub fn trotter_reduce(&mut self, tolerance: f64) {
+        let mut new_h_t: Vec<Hamiltonian> = Vec::new();
+        let mut current = self.h_t[0];
+        for &h in &self.h_t[1..] {
+            if self.commutator_norm(h, current) < tolerance {
+                current = Hamiltonian {
+                    hx: current.hx + h.hx,
+                    hy: current.hy + h.hy,
+                    hz: current.hz + h.hz,
+                };
+            } else {
+        new_h_t.push(current);
+                current = h
+        }}
+        new_h_t.push(current);
+        (*self).h_t = new_h_t;
+    }
+
+    pub fn propagate(&self, initial: QubitState) -> Vec<QubitState> {
+        let mut state = initial;
+        self.h_t
+            .iter()
+            .map(|&h| {
+                state = state.ti_propagate(h, self.times.step);
+                state
+            })
+            .collect()
+    }
+
+    pub fn propagate_to_final(&self, initial: QubitState) -> QubitState {
+        let mut state = initial;
+        for &h in &self.h_t {
+            state = state.ti_propagate(h, self.times.step);
+        }
+        state
+    }
+}

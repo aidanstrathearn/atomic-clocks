@@ -1,5 +1,7 @@
 mod operator;
 mod state;
+mod pulse;
 
-pub use operator::{GaussianPulse, Hamiltonian, Operator, TimeDependentHamiltonian};
-pub use state::QubitState;
+pub use pulse::GaussianPulse;
+pub use operator::{Hamiltonian, Operator, TimeDependentHamiltonian};
+pub use state::{QubitState, Solver};

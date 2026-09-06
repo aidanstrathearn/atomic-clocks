@@ -4,9 +4,9 @@ use crate::maths::normalised_gaussian;
 
 #[derive(Copy, Clone)]
 pub struct Hamiltonian {
-    hx: f64,
-    hy: f64,
-    hz: f64,
+    pub(crate) hx: f64,
+    pub(crate) hy: f64,
+    pub(crate) hz: f64,
 }
 
 impl Hamiltonian {
@@ -21,23 +21,6 @@ impl Hamiltonian {
 
 pub trait TimeDependentHamiltonian {
     fn h(&self, t: f64) -> Hamiltonian;
-}
-
-pub struct GaussianPulse {
-    pub pulse_area: f64,
-    pub detuning: f64,
-    pub width: f64,
-    pub center: f64,
-}
-
-impl TimeDependentHamiltonian for GaussianPulse {
-    fn h(&self, t: f64) -> Hamiltonian {
-        Hamiltonian::new(
-            self.pulse_area * normalised_gaussian(t, self.center, self.width),
-            0.0,
-            self.detuning,
-        )
-    }
 }
 
 #[derive(Copy, Clone)]
