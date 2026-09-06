@@ -1,29 +1,38 @@
 use num_complex::Complex64;
 
-use crate::maths::normalised_gaussian;
+#[derive(Copy, Clone)]
+pub struct Vec3 {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+impl Vec3 {
+    pub fn norm(&self) -> f64 {
+        (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
+    }
+}
 
 #[derive(Copy, Clone)]
 pub struct Hamiltonian {
-    pub(crate) hx: f64,
-    pub(crate) hy: f64,
-    pub(crate) hz: f64,
+    pub(crate) r: Vec3,
 }
 
 impl Hamiltonian {
     pub fn new(hx: f64, hy: f64, hz: f64) -> Self {
-        Self { hx, hy, hz }
+        Self {
+            r: Vec3 { x: hx, y: hy, z: hz },
+        }
     }
 
     pub fn norm(&self) -> f64 {
-        (self.hx * self.hx + self.hy * self.hy + self.hz * self.hz).sqrt()
+        self.r.norm()
     }
-
-
 }
 
 pub fn commutator_norm(h1: Hamiltonian, h2: Hamiltonian) -> f64 {
     let h1h2 = h1.norm() * h2.norm();
-    let cos_theta = (h1.hx * h2.hx + h1.hy * h2.hy + h1.hz * h2.hz) / h1h2;
+    let cos_theta = (h1.r.x * h2.r.x + h1.r.y * h2.r.y + h1.r.z * h2.r.z) / h1h2;
     h1h2 * (1.0 - cos_theta * cos_theta).sqrt()
 }
 
@@ -86,9 +95,9 @@ impl Operator {
 
         let k = sin_theta / norm;
 
-        let sx = k * hamiltonian.hx;
-        let sy = k * hamiltonian.hy;
-        let sz = k * hamiltonian.hz;
+        let sx = k * hamiltonian.r.x;
+        let sy = k * hamiltonian.r.y;
+        let sz = k * hamiltonian.r.z;
 
         Self {
             gg: Complex64::new(cos_theta, sz),

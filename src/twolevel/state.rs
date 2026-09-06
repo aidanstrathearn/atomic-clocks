@@ -161,11 +161,11 @@ impl Solver {
         let tol = tolerance * 4.0 / self.times.array.len() as f64;
         for &h in &self.h_t[1..] {
             if self.times.step.powi(2) * commutator_norm(h, current) < tol {
-                current = Hamiltonian {
-                    hx: current.hx + h.hx,
-                    hy: current.hy + h.hy,
-                    hz: current.hz + h.hz,
-                };
+                current = Hamiltonian::new(
+                    current.r.x + h.r.x,
+                    current.r.y + h.r.y,
+                    current.r.z + h.r.z,
+                );
                 current_t += self.times.step;
             } else {
                 new_h_t.push(current);
