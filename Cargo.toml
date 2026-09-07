@@ -3,10 +3,17 @@ name = "atomic-clocks"
 version = "0.1.0"
 edition = "2024"
 
+[dependencies]
+rustfft = "6.4.1"
+
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
 myplotlib = { git = "https://github.com/aidanstrathearn/myplotlib.git" }
 
 [[bench]]
 name = "propagation"
+harness = false
+
+[[bench]]
+name = "fourier"
 harness = false
