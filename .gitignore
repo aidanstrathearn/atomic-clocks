@@ -1,4 +1,5 @@
 /target
 .idea/
-notes/
+local-examples/notes/
 /local-examples/
+.cargo/config.toml

@@ -3,33 +3,67 @@ use crate::vec3::Vec3;
 
 #[derive(Copy, Clone)]
 pub struct Unitary {
-    pub r: Vec3,
+    // U = c I - i u.sigma; c and u together form a unit quaternion.
+    c: f64,
+    u: Vec3,
 }
 
 impl Unitary {
-    pub fn from_hamiltonian(hamiltonian: Hamiltonian, dt: f64) -> Self {
+    pub fn identity() -> Self {
         Self {
-            r: hamiltonian.r * dt,
+            c: 1.0,
+            u: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
+    }
+
+    pub fn from_hamiltonian(hamiltonian: Hamiltonian, dt: f64) -> Self {
+        let v = hamiltonian.r * dt;
+        let angle = v.norm();
+        if angle == 0.0 {
+            return Self::identity();
+        }
+        let (sin_theta, cos_theta) = (0.5 * angle).sin_cos();
+        Self {
+            c: cos_theta,
+            u: v * (sin_theta / angle),
         }
     }
 
     pub fn inverse(&self) -> Self {
-        Self { r: self.r * -1.0 }
+        Self {
+            c: self.c,
+            u: self.u * -1.0,
+        }
+    }
+
+    /// Returns `self * earlier`: apply `earlier` first, then `self`.
+    pub fn compose(&self, earlier: Self) -> Self {
+        Self {
+            c: self.c * earlier.c - self.u.dot(earlier.u),
+            u: earlier.u * self.c + self.u * earlier.c + self.u.cross(earlier.u),
+        }
+    }
+
+    /// Removes floating-point norm drift after accumulating rotations.
+    pub(crate) fn normalised(&self) -> Self {
+        let scale = 1.0 / (self.c * self.c + self.u.dot(self.u)).sqrt();
+        Self {
+            c: self.c * scale,
+            u: self.u * scale,
+        }
     }
 
     pub fn apply_to(&self, bloch: BlochVec) -> BlochVec {
-        let angle = self.r.norm();
-        if angle == 0.0 {
-            return bloch;
-        }
-        let axis = self.r * (1.0 / angle);
+        let t = self.u.cross(bloch.r) * 2.0;
         BlochVec {
-            r: bloch.r.rotate(axis, angle),
+            r: bloch.r + t * self.c + self.u.cross(t),
         }
     }
 }
-
-
 
 #[derive(Copy, Clone)]
 pub struct Hamiltonian {

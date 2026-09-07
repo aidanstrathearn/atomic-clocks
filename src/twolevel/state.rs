@@ -115,4 +115,14 @@ impl Solver {
         }
         state
     }
+
+    /// Composes all step unitaries before applying the net rotation to `initial`.
+    pub fn propagate_to_final_composed(&self, initial: BlochVec) -> BlochVec {
+        let mut total = Unitary::identity();
+        for &h in &self.h_t {
+            let step = Unitary::from_hamiltonian(h, self.times.step);
+            total = step.compose(total);
+        }
+        total.normalised().apply_to(initial)
+    }
 }
