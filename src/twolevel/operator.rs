@@ -15,6 +15,10 @@ impl Unitary {
         }
     }
 
+    pub fn inverse(&self) -> Self {
+        Self { r: self.r * -1.0 }
+    }
+
     pub fn apply_to(&self, bloch: BlochVec) -> BlochVec {
         let angle = self.r.norm();
         if angle == 0.0 {

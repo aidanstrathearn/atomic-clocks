@@ -1,6 +1,6 @@
 use num_complex::Complex64;
 
-use super::operator::{commutator_norm, Hamiltonian, Operator, TimeDependentHamiltonian, Unitary};
+use super::operator::{commutator_norm, Hamiltonian, TimeDependentHamiltonian, Unitary};
 use crate::maths::Linspace;
 use crate::twolevel::Vec3;
 
@@ -49,37 +49,6 @@ impl QubitState {
         }
     }
 
-    pub fn linear_response(
-        &self,
-        hamiltonian: &impl TimeDependentHamiltonian,
-        times: &Linspace,
-        perturbation: Operator,
-    ) -> Vec<f64> {
-        let n = times.array.len();
-        let mut trajectory = Vec::with_capacity(n);
-        let mut forward = *self;
-
-        for &t in &times.array {
-            let step = Operator::ti_propagator(hamiltonian.h(t), times.step);
-            forward = step.apply_to(forward);
-            trajectory.push((step, forward));
-        }
-
-        let final_ground = forward.ground;
-        let mut responses = vec![0.0; n];
-        let mut future = Operator::identity();
-
-        for i in (0..n).rev() {
-            let (step, forward_state) = trajectory[i];
-            let inserted = perturbation.apply_to(forward_state);
-            let response_amplitude = future.gg * inserted.ground + future.ge * inserted.excited;
-
-            responses[i] = 2.0 * (final_ground.conj() * response_amplitude).im;
-            future = future.multiply(step);
-        }
-
-        responses
-    }
 }
 
 pub struct Solver {
@@ -93,6 +62,34 @@ impl Solver {
             h_t: times.array.iter().map(|&t| system.h(t)).collect(),
             times,
         }
+    }
+
+    /// Returns the derivative of final ground probability with respect to a kick
+    /// `exp(-i * epsilon * perturbation.r.sigma / 2)` after each stored step.
+    /// No time-step factor is included. After reduction, entries correspond to
+    /// the reduced steps rather than the original Hamiltonian samples.
+    pub fn linear_response(&self, initial: BlochVec, perturbation: Hamiltonian) -> Vec<f64> {
+        let n = self.h_t.len();
+        let mut trajectory = Vec::with_capacity(n);
+        let mut forward = initial;
+
+        for &h in &self.h_t {
+            let step = Unitary::from_hamiltonian(h, self.times.step);
+            forward = step.apply_to(forward);
+            trajectory.push((step, forward));
+        }
+
+        let mut responses = vec![0.0; n];
+        // A pure state's Bloch vector also specifies its measurement projector.
+        let mut measurement = BlochVec::ground();
+
+        for i in (0..n).rev() {
+            let (step, forward_state) = trajectory[i];
+            responses[i] = 0.5 * measurement.r.dot(perturbation.r.cross(forward_state.r));
+            measurement = step.inverse().apply_to(measurement);
+        }
+
+        responses
     }
 
     pub fn trotter_reduce(&mut self, tolerance: f64) -> Vec<f64> {
