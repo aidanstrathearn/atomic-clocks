@@ -1,5 +1,3 @@
-use num_complex::Complex64;
-
 use super::operator::{commutator_norm, Hamiltonian, TimeDependentHamiltonian, Unitary};
 use crate::maths::Linspace;
 use crate::twolevel::Vec3;
@@ -27,26 +25,6 @@ impl BlochVec {
     pub fn ground_probability(&self) -> f64 {
         // The excited state lies at r.z = +1.
         0.5 * (1.0 - self.r.z)
-    }
-
-}
-
-#[derive(Copy, Clone)]
-pub struct QubitState {
-    pub ground: Complex64,
-    pub excited: Complex64,
-}
-
-impl QubitState {
-    pub fn ground_probability(&self) -> f64 {
-        self.ground.norm_sqr()
-    }
-
-    pub fn ground() -> Self {
-        Self {
-            ground: Complex64::new(1.0, 0.0),
-            excited: Complex64::new(0.0, 0.0),
-        }
     }
 
 }
