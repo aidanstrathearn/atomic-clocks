@@ -2,6 +2,7 @@ use std::f64::consts::PI;
 
 use rustfft::{FftPlanner, num_complex::Complex64};
 
+#[derive(Clone)]
 pub struct FourierSpectrum {
     /// Angular frequencies in radians per unit time.
     pub angular_frequencies: Vec<f64>,

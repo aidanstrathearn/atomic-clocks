@@ -14,6 +14,3 @@ myplotlib = { git = "https://github.com/aidanstrathearn/myplotlib.git" }
 name = "propagation"
 harness = false
 
-[[bench]]
-name = "fourier"
-harness = false

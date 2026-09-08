@@ -3,3 +3,4 @@
 local-examples/notes/
 /local-examples/
 .cargo/config.toml
+/src/sketches.rs
