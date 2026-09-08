@@ -1,3 +1,6 @@
+pub mod demodulation;
+pub mod vec3;
+
 use std::f64::consts::PI;
 
 use rustfft::{FftPlanner, num_complex::Complex64};

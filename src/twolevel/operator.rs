@@ -1,5 +1,5 @@
 use super::state::BlochVec;
-use crate::vec3::Vec3;
+use crate::maths::vec3::Vec3;
 
 #[derive(Copy, Clone)]
 pub struct Unitary {

@@ -1,7 +1,7 @@
 use atomic_clocks::maths::Linspace;
-use atomic_clocks::ramsey::Ramsey;
+use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::twolevel::{BlochVec, Hamiltonian, Solver, Unitary};
-use atomic_clocks::vec3::Vec3;
+use atomic_clocks::maths::vec3::Vec3;
 
 fn assert_close(actual: f64, expected: f64) {
     assert!(

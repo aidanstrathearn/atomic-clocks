@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
 use atomic_clocks::maths::{Linspace, fourier_transform, linspace};
-use atomic_clocks::ramsey::Ramsey;
+use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::twolevel::{BlochVec, Hamiltonian, Solver};
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
