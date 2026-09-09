@@ -1,8 +1,6 @@
 mod operator;
-mod state;
-mod pulse;
+mod solver;
 
-pub use pulse::GaussianPulse;
-pub use operator::{Hamiltonian, TimeDependentHamiltonian, Unitary};
 pub use crate::maths::vec3::Vec3;
-pub use state::{BlochVec, Solver};
+pub use operator::{BlochVec, Hamiltonian, TimeDependentHamiltonian, Unitary};
+pub use solver::Solver;
