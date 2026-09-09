@@ -1,3 +1,4 @@
+use std::ops::Range;
 use crate::maths::vec3::Vec3;
 
 #[derive(Copy, Clone)]
@@ -27,11 +28,38 @@ impl BlochVec {
 }
 
 #[derive(Copy, Clone)]
+pub struct TrotterConfig {
+    pub start: f64,
+    pub stop: f64,
+    pub nsteps: usize,
+    pub tolerance: f64,
+}
+
+impl TrotterConfig {
+    fn validate(self) {
+        assert!(self.nsteps > 0, "at least one integration step is required");
+        assert!(
+            self.start.is_finite() && self.stop.is_finite() && self.stop >= self.start,
+            "time boundaries must be finite with stop >= start"
+        );
+        assert!(
+            self.tolerance.is_finite() && self.tolerance >= 0.0,
+            "reduction tolerance must be finite and nonnegative"
+        );
+    }
+
+    fn dt(self) -> f64 {
+        (self.stop - self.start) / self.nsteps as f64
+    }
+}
+
+#[derive(Copy, Clone)]
 pub struct Unitary {
     // U = c I - i u.sigma; c and u together form a unit quaternion.
     c: f64,
     u: Vec3,
 }
+
 
 impl Unitary {
     pub fn identity() -> Self {
@@ -56,6 +84,49 @@ impl Unitary {
             c: cos_theta,
             u: v * (sin_theta / angle),
         }
+    }
+
+    pub fn from_system(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
+        config.validate();
+        if config.start == config.stop {
+            return Self::identity();
+        }
+        let total = if config.tolerance > 0.0 {
+            Self::reduced_compose(system, config)
+        } else {
+            Self::direct_compose(system, config)
+        };
+        total.normalised()
+    }
+
+    fn direct_compose(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
+        let dt = config.dt();
+        let mut total = Self::identity();
+        for i in 0..config.nsteps {
+            let t = config.start + i as f64 * dt;
+            total = Self::from_hamiltonian(system.h(t), dt).compose(total);
+        }
+        total
+    }
+
+    fn reduced_compose(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
+        let dt = config.dt();
+        let threshold = 4.0 * (config.tolerance / config.nsteps as f64);
+        let mut total = Self::identity();
+        let mut pending = Hamiltonian::default();
+        for i in 0..config.nsteps {
+            let t = config.start + i as f64 * dt;
+            let action = Hamiltonian {
+                r: system.h(t).r * dt,
+            };
+            if commutator_norm(pending, action) < threshold {
+                pending.r = pending.r + action.r;
+            } else {
+                total = Self::from_hamiltonian(pending, 1.0).compose(total);
+                pending = action;
+            }
+        }
+        Self::from_hamiltonian(pending, 1.0).compose(total)
     }
 
     pub fn inverse(&self) -> Self {
@@ -93,6 +164,12 @@ impl Unitary {
 #[derive(Copy, Clone)]
 pub struct Hamiltonian {
     pub(crate) r: Vec3,
+}
+
+impl Default for Hamiltonian {
+    fn default() -> Self {
+        Self::new(0.0, 0.0, 0.0)
+    }
 }
 
 impl Hamiltonian {

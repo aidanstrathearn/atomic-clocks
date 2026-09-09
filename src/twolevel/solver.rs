@@ -1,4 +1,4 @@
-use super::operator::{BlochVec, Hamiltonian, TimeDependentHamiltonian, Unitary, commutator_norm};
+use super::operator::{BlochVec, Hamiltonian, TimeDependentHamiltonian, Unitary};
 
 #[derive(Clone)]
 pub struct Solver {
@@ -87,45 +87,6 @@ impl Solver {
         responses
     }
 
-    #[must_use]
-    pub fn trotter_reduce(&self, tolerance: f64) -> Self {
-        assert!(
-            tolerance.is_finite() && tolerance >= 0.0,
-            "reduction tolerance must be finite and nonnegative"
-        );
-        if self.hamiltonians.len() < 2 || tolerance == 0.0 {
-            return self.clone();
-        }
-        let mut hamiltonians = Vec::new();
-        let mut times = vec![self.times[0]];
-        let mut current = self.hamiltonians[0];
-        let mut start = self.times[0];
-        let mut end = self.times[1];
-        let tol = 4.0 * (tolerance / self.hamiltonians.len() as f64);
-        for (i, (h, dt)) in self.steps().enumerate().skip(1) {
-            let duration = end - start;
-            let next_end = self.times[i + 1];
-            let current_action = Hamiltonian {
-                r: current.r * duration,
-            };
-            let next_action = Hamiltonian { r: h.r * dt };
-            if commutator_norm(current_action, next_action) < tol {
-                current = Hamiltonian {
-                    r: (current_action.r + next_action.r) * (1.0 / (next_end - start)),
-                };
-            } else {
-                hamiltonians.push(current);
-                times.push(end);
-                current = h;
-                start = end;
-            }
-            end = next_end;
-        }
-        hamiltonians.push(current);
-        times.push(end);
-        Self::new(hamiltonians, times)
-    }
-
     /// Returns the state after each step, excluding `initial`. These states
     /// correspond to `times()[1..]`, including on a reduced grid.
     pub fn propagate(&self, initial: BlochVec) -> Vec<BlochVec> {
@@ -136,23 +97,5 @@ impl Solver {
                 state
             })
             .collect()
-    }
-
-    pub fn propagate_to_final(&self, initial: BlochVec) -> BlochVec {
-        let mut state = initial;
-        for (h, dt) in self.steps() {
-            state = Unitary::from_hamiltonian(h, dt).apply_to(state);
-        }
-        state
-    }
-
-    /// Composes all step unitaries before applying the net rotation to `initial`.
-    pub fn propagate_to_final_composed(&self, initial: BlochVec) -> BlochVec {
-        let mut total = Unitary::identity();
-        for (h, dt) in self.steps() {
-            let step = Unitary::from_hamiltonian(h, dt);
-            total = step.compose(total);
-        }
-        total.normalised().apply_to(initial)
     }
 }

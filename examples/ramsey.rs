@@ -2,7 +2,7 @@ use std::f64::consts::PI;
 
 use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::{Linspace, fourier_transform, linspace};
-use atomic_clocks::twolevel::{BlochVec, Hamiltonian, Solver};
+use atomic_clocks::twolevel::{BlochVec, Hamiltonian, Solver, TrotterConfig, Unitary};
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
 const TIME_START: f64 = -1.0;
@@ -63,11 +63,16 @@ fn signal_plot(params: &mut Params) -> AppResult {
             pulse_separation: PULSE_SEPARATION,
             phase_diff: 0.0,
         };
-        let solver = Solver::from(
+        let unitary = Unitary::from_system(
             &ramsey,
-            Linspace::new(TIME_START, TIME_STOP, params.time_steps).array,
+            TrotterConfig {
+                start: TIME_START,
+                stop: TIME_STOP,
+                nsteps: params.time_steps,
+                tolerance: 0.0,
+            },
         );
-        signal.push(solver.propagate_to_final(initial).ground_probability());
+        signal.push(unitary.apply_to(initial).ground_probability());
     }
 
     let mut plot = Plotter::new();

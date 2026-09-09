@@ -1,8 +1,7 @@
 use std::{f64::consts::FRAC_PI_2, hint::black_box, time::Duration};
 
 use atomic_clocks::interferometer::ramsey::Ramsey;
-use atomic_clocks::maths::Linspace;
-use atomic_clocks::twolevel::{BlochVec, Solver};
+use atomic_clocks::twolevel::{BlochVec, TrotterConfig, Unitary};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 fn propagation(c: &mut Criterion) {
@@ -17,35 +16,24 @@ fn propagation(c: &mut Criterion) {
 
     for nsteps in [32, 501, 10_000] {
         for reduced in [false, true] {
-            // Sample the Hamiltonian and reduce outside the timed region.
-            let mut solver = Solver::from(&ramsey, Linspace::new(-1.0, 3.0, nsteps).array);
-            if reduced {
-                solver = solver.trotter_reduce(1.0e-6);
-            }
-            let expected = solver.propagate_to_final(initial);
-            let actual = solver.propagate_to_final_composed(initial);
-            for (actual, expected) in [
-                (actual.r.x, expected.r.x),
-                (actual.r.y, expected.r.y),
-                (actual.r.z, expected.r.z),
-            ] {
-                assert!(
-                    (actual - expected).abs() < 1.0e-10,
-                    "methods disagree: composed {actual}, sequential {expected}"
-                );
-            }
-
+            let tolerance = if reduced { 1.0e-6 } else { 0.0 };
             let mode = if reduced { "reduced" } else { "full" };
-            let steps = solver.hamiltonians().len();
-            eprintln!("{mode}/{nsteps}: {steps} stored steps; final states agree");
-            let mut group = c.benchmark_group(format!("propagation/{mode}/{nsteps}"));
-            group.throughput(Throughput::Elements(steps as u64));
-            group.bench_function("sequential", |b| {
-                b.iter(|| black_box(black_box(&solver).propagate_to_final(black_box(initial))));
-            });
+            let mut group = c.benchmark_group(format!("from_system/{mode}/{nsteps}"));
+            group.throughput(Throughput::Elements(nsteps as u64));
             group.bench_function("composed", |b| {
                 b.iter(|| {
-                    black_box(black_box(&solver).propagate_to_final_composed(black_box(initial)))
+                    black_box(
+                        Unitary::from_system(
+                            black_box(&ramsey),
+                            TrotterConfig {
+                                start: black_box(-1.0),
+                                stop: black_box(3.0),
+                                nsteps: black_box(nsteps),
+                                tolerance: black_box(tolerance),
+                            },
+                        )
+                        .apply_to(black_box(initial)),
+                    )
                 });
             });
             group.finish();
