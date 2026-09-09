@@ -1,5 +1,5 @@
-use crate::maths::{Linspace, normalised_gaussian};
-use crate::twolevel::{Hamiltonian, BlochVec, Solver, TimeDependentHamiltonian};
+use crate::maths::normalised_gaussian;
+use crate::twolevel::{Hamiltonian, TimeDependentHamiltonian};
 
 pub struct Ramsey {
     pub pulse_area: f64,
@@ -7,12 +7,6 @@ pub struct Ramsey {
     pub pulse_width: f64,
     pub pulse_separation: f64,
     pub phase_diff: f64,
-}
-
-impl Ramsey {
-    pub fn propagate_to_final(&self, initial: &BlochVec, times: &Linspace) -> BlochVec {
-        Solver::from(self, times.clone()).propagate_to_final(*initial)
-    }
 }
 
 impl TimeDependentHamiltonian for Ramsey {
@@ -48,11 +42,5 @@ impl TimeDependentHamiltonian for ModulatedRamsey {
             0.0,
             self.detuning + self.mod_depth * (self.mod_freq * (t + self.start_time)).sin(),
         )
-    }
-}
-
-impl ModulatedRamsey {
-    pub fn propagate_to_final(&self, initial: &BlochVec, times: &Linspace) -> BlochVec {
-        Solver::from(self, times.clone()).propagate_to_final(*initial)
     }
 }

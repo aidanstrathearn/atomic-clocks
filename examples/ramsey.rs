@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
-use atomic_clocks::maths::{Linspace, fourier_transform, linspace};
 use atomic_clocks::interferometer::ramsey::Ramsey;
+use atomic_clocks::maths::{Linspace, fourier_transform, linspace};
 use atomic_clocks::twolevel::{BlochVec, Hamiltonian, Solver};
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
@@ -52,7 +52,7 @@ fn signal_plot(params: &mut Params) -> AppResult {
     let initial = BlochVec::ground();
     let detuning_limit = 4.0 / params.pulse_width;
     params.detuning = params.detuning.clamp(-detuning_limit, detuning_limit);
-    let detunings = linspace(-detuning_limit, detuning_limit, N_DETUNINGS);
+    let detunings = linspace(-detuning_limit, detuning_limit, N_DETUNINGS - 1);
     let mut signal = Vec::with_capacity(detunings.len());
 
     for &detuning in &detunings {
@@ -63,10 +63,9 @@ fn signal_plot(params: &mut Params) -> AppResult {
             pulse_separation: PULSE_SEPARATION,
             phase_diff: 0.0,
         };
-        // Linspace includes both endpoints, so N samples require N - 1 intervals.
         let solver = Solver::from(
             &ramsey,
-            Linspace::new(TIME_START, TIME_STOP, params.time_steps - 1),
+            Linspace::new(TIME_START, TIME_STOP, params.time_steps),
         );
         signal.push(solver.propagate_to_final(initial).ground_probability());
     }
@@ -86,7 +85,7 @@ fn temporal_response(params: &mut Params) -> (Linspace, Vec<f64>) {
     let detuning_limit = 4.0 / params.pulse_width;
     params.detuning = params.detuning.clamp(-detuning_limit, detuning_limit);
     let initial = BlochVec::ground();
-    let times = Linspace::new(TIME_START, TIME_STOP, params.time_steps - 1);
+    let times = Linspace::new(TIME_START, TIME_STOP, params.time_steps);
     let ramsey = Ramsey {
         pulse_area: params.pulse_area,
         detuning: params.detuning,
@@ -101,7 +100,7 @@ fn temporal_response(params: &mut Params) -> (Linspace, Vec<f64>) {
     // Each response is to a kick after its propagation step.
     let kick_times = Linspace {
         step: times.step,
-        array: times.array.into_iter().map(|t| t + times.step).collect(),
+        array: times.array.into_iter().skip(1).collect(),
     };
     (kick_times, response)
 }
@@ -119,7 +118,7 @@ fn response_plot(params: &mut Params) -> AppResult {
     ));
     plot.xlabel("Kick time");
     plot.ylabel("Final ground probability response per sigma-z kick");
-    plot.xlim(TIME_START, TIME_STOP + kick_times.step);
+    plot.xlim(TIME_START, TIME_STOP);
     Ok(plot)
 }
 

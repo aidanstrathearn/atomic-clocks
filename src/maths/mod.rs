@@ -83,7 +83,10 @@ pub struct Linspace {
 }
 
 impl Linspace {
+    /// Divides `[start, stop]` into `nsteps` intervals, returning `nsteps + 1`
+    /// boundary points including both endpoints. `nsteps` must be positive.
     pub fn new(start: f64, stop: f64, nsteps: usize) -> Self {
+        assert!(nsteps > 0, "Linspace requires at least one interval");
         let step: f64 = (stop - start) / (nsteps as f64);
         Self {
             step,
@@ -92,7 +95,8 @@ impl Linspace {
     }
 }
 
+/// Returns the `nsteps + 1` boundary points of `nsteps` intervals, including
+/// both endpoints. `nsteps` must be positive.
 pub fn linspace(start: f64, stop: f64, nsteps: usize) -> Vec<f64> {
-    let step: f64 = (stop - start) / (nsteps as f64);
-    (0..=nsteps).map(|x| start + (x as f64) * step).collect()
+    Linspace::new(start, stop, nsteps).array
 }

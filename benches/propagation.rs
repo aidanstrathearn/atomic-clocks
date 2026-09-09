@@ -1,7 +1,7 @@
 use std::{f64::consts::FRAC_PI_2, hint::black_box, time::Duration};
 
-use atomic_clocks::maths::Linspace;
 use atomic_clocks::interferometer::ramsey::Ramsey;
+use atomic_clocks::maths::Linspace;
 use atomic_clocks::twolevel::{BlochVec, Solver};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
@@ -15,10 +15,10 @@ fn propagation(c: &mut Criterion) {
     };
     let initial = BlochVec::ground();
 
-    for samples in [32, 501, 10_000] {
+    for nsteps in [32, 501, 10_000] {
         for reduced in [false, true] {
             // Sample the Hamiltonian and reduce outside the timed region.
-            let mut solver = Solver::from(&ramsey, Linspace::new(-1.0, 3.0, samples - 1));
+            let mut solver = Solver::from(&ramsey, Linspace::new(-1.0, 3.0, nsteps));
             if reduced {
                 solver.trotter_reduce(1.0e-6);
             }
@@ -37,8 +37,8 @@ fn propagation(c: &mut Criterion) {
 
             let mode = if reduced { "reduced" } else { "full" };
             let steps = solver.h_t.len();
-            eprintln!("{mode}/{samples}: {steps} stored steps; final states agree");
-            let mut group = c.benchmark_group(format!("propagation/{mode}/{samples}"));
+            eprintln!("{mode}/{nsteps}: {steps} stored steps; final states agree");
+            let mut group = c.benchmark_group(format!("propagation/{mode}/{nsteps}"));
             group.throughput(Throughput::Elements(steps as u64));
             group.bench_function("sequential", |b| {
                 b.iter(|| black_box(black_box(&solver).propagate_to_final(black_box(initial))));

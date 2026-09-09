@@ -7,9 +7,15 @@ pub struct Solver {
 }
 
 impl Solver {
+    /// Samples the Hamiltonian at each interval's left endpoint. The final
+    /// boundary ends the last step and is not an additional Hamiltonian sample.
     pub fn from(system: &impl TimeDependentHamiltonian, times: Linspace) -> Self {
         Self {
-            h_t: times.array.iter().map(|&t| system.h(t)).collect(),
+            h_t: times
+                .array
+                .windows(2)
+                .map(|interval| system.h(interval[0]))
+                .collect(),
             times,
         }
     }
@@ -18,6 +24,7 @@ impl Solver {
     /// `exp(-i * epsilon * perturbation.r.sigma / 2)` after each stored step.
     /// No time-step factor is included. After reduction, entries correspond to
     /// the reduced steps rather than the original Hamiltonian samples.
+    /// Before reduction, the kick times are `times.array[1..]`, ending at `stop`.
     pub fn linear_response(&self, initial: BlochVec, perturbation: Hamiltonian) -> Vec<f64> {
         let n = self.h_t.len();
         let mut trajectory = Vec::with_capacity(n);
@@ -42,26 +49,27 @@ impl Solver {
         responses
     }
 
+    /// Reduces the original step sequence and returns the end time of each
+    /// reduced step, matching the states and kicks returned by this solver.
     pub fn trotter_reduce(&mut self, tolerance: f64) -> Vec<f64> {
         let mut new_h_t: Vec<Hamiltonian> = Vec::new();
         let mut new_times: Vec<f64> = Vec::new();
         let mut current = self.h_t[0];
-        let mut current_t = self.times.array[0];
-        let tol = tolerance * 4.0 / self.times.array.len() as f64;
-        for &h in &self.h_t[1..] {
+        let mut current_t = self.times.array[1];
+        let tol = tolerance * 4.0 / (self.times.array.len() - 1) as f64;
+        for (i, &h) in self.h_t[1..].iter().enumerate() {
             if self.times.step.powi(2) * commutator_norm(h, current) < tol {
                 current = Hamiltonian::new(
                     current.r.x + h.r.x,
                     current.r.y + h.r.y,
                     current.r.z + h.r.z,
                 );
-                current_t += self.times.step;
             } else {
                 new_h_t.push(current);
                 new_times.push(current_t);
                 current = h;
-                current_t += self.times.step;
             }
+            current_t = self.times.array[i + 2];
         }
         new_h_t.push(current);
         new_times.push(current_t);
@@ -69,6 +77,8 @@ impl Solver {
         new_times
     }
 
+    /// Returns the state after each step, excluding `initial`. Before reduction,
+    /// these states correspond to `times.array[1..]`, ending at `stop`.
     pub fn propagate(&self, initial: BlochVec) -> Vec<BlochVec> {
         let mut state = initial;
         self.h_t
