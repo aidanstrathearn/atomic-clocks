@@ -112,9 +112,7 @@ impl Hamiltonian {
 }
 
 pub fn commutator_norm(h1: Hamiltonian, h2: Hamiltonian) -> f64 {
-    let h1h2 = h1.norm() * h2.norm();
-    let cos_theta = (h1.r.x * h2.r.x + h1.r.y * h2.r.y + h1.r.z * h2.r.z) / h1h2;
-    h1h2 * (1.0 - cos_theta * cos_theta).sqrt()
+    h1.r.cross(h2.r).norm()
 }
 
 pub trait TimeDependentHamiltonian {

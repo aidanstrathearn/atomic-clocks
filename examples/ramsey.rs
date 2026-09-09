@@ -65,7 +65,7 @@ fn signal_plot(params: &mut Params) -> AppResult {
         };
         let solver = Solver::from(
             &ramsey,
-            Linspace::new(TIME_START, TIME_STOP, params.time_steps),
+            Linspace::new(TIME_START, TIME_STOP, params.time_steps).array,
         );
         signal.push(solver.propagate_to_final(initial).ground_probability());
     }
@@ -93,7 +93,7 @@ fn temporal_response(params: &mut Params) -> (Linspace, Vec<f64>) {
         pulse_separation: PULSE_SEPARATION,
         phase_diff: 0.0,
     };
-    let solver = Solver::from(&ramsey, times.clone());
+    let solver = Solver::from(&ramsey, times.array.clone());
     // Hamiltonian stores h in h.sigma / 2, so h.z = 2 represents sigma_z.
     let perturbation = Hamiltonian::new(0.0, 0.0, 2.0);
     let response = solver.linear_response(initial, perturbation);

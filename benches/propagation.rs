@@ -18,9 +18,9 @@ fn propagation(c: &mut Criterion) {
     for nsteps in [32, 501, 10_000] {
         for reduced in [false, true] {
             // Sample the Hamiltonian and reduce outside the timed region.
-            let mut solver = Solver::from(&ramsey, Linspace::new(-1.0, 3.0, nsteps));
+            let mut solver = Solver::from(&ramsey, Linspace::new(-1.0, 3.0, nsteps).array);
             if reduced {
-                solver.trotter_reduce(1.0e-6);
+                solver = solver.trotter_reduce(1.0e-6);
             }
             let expected = solver.propagate_to_final(initial);
             let actual = solver.propagate_to_final_composed(initial);
@@ -36,7 +36,7 @@ fn propagation(c: &mut Criterion) {
             }
 
             let mode = if reduced { "reduced" } else { "full" };
-            let steps = solver.h_t.len();
+            let steps = solver.hamiltonians().len();
             eprintln!("{mode}/{nsteps}: {steps} stored steps; final states agree");
             let mut group = c.benchmark_group(format!("propagation/{mode}/{nsteps}"));
             group.throughput(Throughput::Elements(steps as u64));
