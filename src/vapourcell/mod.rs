@@ -159,6 +159,9 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
 }
 
 fn validate_params(params: &MtsParams) -> Result<(), String> {
+    if !params.mod_freq.is_finite() || params.mod_freq <= 0.0 {
+        return Err("mod_freq must be positive and finite".to_string());
+    }
     if params.kr_n == 0 {
         return Err("kr_n must be positive".to_string());
     }
@@ -524,12 +527,41 @@ mod tests {
 
     #[test]
     fn baseline_fixture_matches_python() {
-        assert_fixture(include_str!("../fixtures/baseline.fixture"));
+        assert_fixture(include_str!("fixtures/baseline.fixture"));
     }
 
     #[test]
     fn pump_shifted_fixture_matches_python() {
-        assert_fixture(include_str!("../fixtures/pump_shifted.fixture"));
+        assert_fixture(include_str!("fixtures/pump_shifted.fixture"));
+    }
+
+    #[test]
+    fn rejects_invalid_modulation_frequency() {
+        for mod_freq in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let params = MtsParams {
+                mod_freq,
+                ..MtsParams::default()
+            };
+            assert_eq!(
+                compute_demod(&params).unwrap_err(),
+                "mod_freq must be positive and finite"
+            );
+        }
+    }
+
+    #[test]
+    fn default_scan_is_finite_in_every_frame() {
+        for frame in [Frame::Pump, Frame::Atom, Frame::Probe] {
+            let params = MtsParams {
+                frame,
+                ..MtsParams::default()
+            };
+            let output = compute_demod(&params).expect("default scan succeeds");
+            for values in [&output.hz, &output.amp0, &output.amp1, &output.proj1] {
+                assert_eq!(values.len(), params.hz_num);
+                assert!(values.iter().all(|value| value.is_finite()), "{frame:?}");
+            }
+        }
     }
 
     fn assert_fixture(text: &str) {
