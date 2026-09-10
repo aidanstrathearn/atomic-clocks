@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use crate::twolevel::{Hamiltonian, Liouvillian, Vec3};
+use crate::twolevel::{BlochVec, Hamiltonian, Liouvillian, Vec3};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Frame {
@@ -104,11 +104,11 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
 
     let theta = PI / 2.0;
     let phi = PI / 2.0;
-    let rot = [
-        theta.sin() * phi.cos(),
-        theta.sin() * phi.sin(),
-        theta.cos(),
-    ];
+    let rot = Vec3 {
+        x: theta.sin() * phi.cos(),
+        y: theta.sin() * phi.sin(),
+        z: theta.cos(),
+    };
 
     let mut amp0 = Vec::with_capacity(hz_array.len());
     let mut proj0 = Vec::with_capacity(hz_array.len());
@@ -224,15 +224,14 @@ fn accumulate_projected_trajectory(
     hz_offset: f64,
     kr_phase: f64,
     kr_harmonic: f64,
-    rot: [f64; 3],
+    rot: Vec3,
     projected: &mut [f64],
 ) {
-    let mut state = [0.0, 0.0, -1.0];
+    let mut state = BlochVec::ground();
 
     for idx in 0..t_array.len() {
         if idx >= last_start {
-            projected[idx - last_start] +=
-                state[0] * rot[0] + state[1] * rot[1] + state[2] * rot[2];
+            projected[idx - last_start] += state.r.dot(rot);
         }
         if idx + 1 == t_array.len() {
             break;
@@ -307,7 +306,7 @@ fn lockin(traj: &[f64], t_array: &[f64], freq: f64) -> (f64, f64) {
     (amplitude, phase)
 }
 
-fn r_ss(liouvillian: Liouvillian) -> [f64; 3] {
+fn r_ss(liouvillian: Liouvillian) -> BlochVec {
     let Liouvillian {
         hamiltonian,
         gamma_up,
@@ -329,7 +328,13 @@ fn r_ss(liouvillian: Liouvillian) -> [f64; 3] {
     let v2 = hz * hz + gamma2 * gamma2;
 
     let scale = numerator / denominator;
-    [scale * v0, scale * v1, scale * v2]
+    BlochVec {
+        r: Vec3 {
+            x: scale * v0,
+            y: scale * v1,
+            z: scale * v2,
+        },
+    }
 }
 
 fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
@@ -353,9 +358,14 @@ fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
     (a1, a2, a3)
 }
 
-fn propagate(liouvillian: Liouvillian, r0: [f64; 3], t: f64) -> [f64; 3] {
-    let rss = r_ss(liouvillian);
-    let w = [r0[0] - rss[0], r0[1] - rss[1], r0[2] - rss[2]];
+fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> BlochVec {
+    let rss = r_ss(liouvillian).r;
+    let r0 = r0.r;
+    let w = Vec3 {
+        x: r0.x - rss.x,
+        y: r0.y - rss.y,
+        z: r0.z - rss.z,
+    };
 
     let Liouvillian {
         hamiltonian,
@@ -376,40 +386,58 @@ fn propagate(liouvillian: Liouvillian, r0: [f64; 3], t: f64) -> [f64; 3] {
     let (c0, c1, c2) = cayley_coeffs(sym, eigs, t);
 
     let h2 = hx * hx + hy * hy + hz * hz;
-    let d = [-gamma2, -gamma2, -gamma1];
+    let d = Vec3 {
+        x: -gamma2,
+        y: -gamma2,
+        z: -gamma1,
+    };
 
-    let w_circ = [d[0] * w[0], d[1] * w[1], d[2] * w[2]];
-    let w_cross = [
-        hy * w[2] - hz * w[1],
-        hz * w[0] - hx * w[2],
-        hx * w[1] - hy * w[0],
-    ];
-    let m_w = [
-        w_circ[0] + w_cross[0],
-        w_circ[1] + w_cross[1],
-        w_circ[2] + w_cross[2],
-    ];
+    let w_circ = Vec3 {
+        x: d.x * w.x,
+        y: d.y * w.y,
+        z: d.z * w.z,
+    };
+    let w_cross = Vec3 {
+        x: hy * w.z - hz * w.y,
+        y: hz * w.x - hx * w.z,
+        z: hx * w.y - hy * w.x,
+    };
+    let m_w = Vec3 {
+        x: w_circ.x + w_cross.x,
+        y: w_circ.y + w_cross.y,
+        z: w_circ.z + w_cross.z,
+    };
 
-    let h_dot_w = hx * w[0] + hy * w[1] + hz * w[2];
-    let h_cross_w_circ = [
-        hy * w_circ[2] - hz * w_circ[1],
-        hz * w_circ[0] - hx * w_circ[2],
-        hx * w_circ[1] - hy * w_circ[0],
-    ];
-    let d_w_circ = [d[0] * w_circ[0], d[1] * w_circ[1], d[2] * w_circ[2]];
-    let d_w_cross = [d[0] * w_cross[0], d[1] * w_cross[1], d[2] * w_cross[2]];
+    let h_dot_w = hx * w.x + hy * w.y + hz * w.z;
+    let h_cross_w_circ = Vec3 {
+        x: hy * w_circ.z - hz * w_circ.y,
+        y: hz * w_circ.x - hx * w_circ.z,
+        z: hx * w_circ.y - hy * w_circ.x,
+    };
+    let d_w_circ = Vec3 {
+        x: d.x * w_circ.x,
+        y: d.y * w_circ.y,
+        z: d.z * w_circ.z,
+    };
+    let d_w_cross = Vec3 {
+        x: d.x * w_cross.x,
+        y: d.y * w_cross.y,
+        z: d.z * w_cross.z,
+    };
 
-    let m2_w = [
-        d_w_circ[0] + d_w_cross[0] + h_cross_w_circ[0] + h_dot_w * hx - h2 * w[0],
-        d_w_circ[1] + d_w_cross[1] + h_cross_w_circ[1] + h_dot_w * hy - h2 * w[1],
-        d_w_circ[2] + d_w_cross[2] + h_cross_w_circ[2] + h_dot_w * hz - h2 * w[2],
-    ];
+    let m2_w = Vec3 {
+        x: d_w_circ.x + d_w_cross.x + h_cross_w_circ.x + h_dot_w * hx - h2 * w.x,
+        y: d_w_circ.y + d_w_cross.y + h_cross_w_circ.y + h_dot_w * hy - h2 * w.y,
+        z: d_w_circ.z + d_w_cross.z + h_cross_w_circ.z + h_dot_w * hz - h2 * w.z,
+    };
 
-    [
-        c0 * w[0] + c1 * m_w[0] + c2 * m2_w[0] + rss[0],
-        c0 * w[1] + c1 * m_w[1] + c2 * m2_w[1] + rss[1],
-        c0 * w[2] + c1 * m_w[2] + c2 * m2_w[2] + rss[2],
-    ]
+    BlochVec {
+        r: Vec3 {
+            x: c0 * w.x + c1 * m_w.x + c2 * m2_w.x + rss.x,
+            y: c0 * w.y + c1 * m_w.y + c2 * m2_w.y + rss.y,
+            z: c0 * w.z + c1 * m_w.z + c2 * m2_w.z + rss.z,
+        },
+    }
 }
 
 fn cubic_roots((a1, a2, a3): (f64, f64, f64)) -> [Complex; 3] {
