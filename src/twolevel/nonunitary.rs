@@ -2,6 +2,24 @@ use crate::maths::complex::Complex;
 
 use super::{BlochVec, Hamiltonian, Vec3};
 
+#[derive(Copy, Clone)]
+pub struct Decay {
+    pub gamma_up: f64,
+    pub gamma_down: f64,
+    pub gamma_phi: f64,
+}
+
+impl Decay {
+    pub fn bloch_diagonal(self) -> Vec3 {
+        let gamma1 = self.gamma_up + self.gamma_down;
+        let gamma2 = 0.5 * (self.gamma_up + self.gamma_down) + self.gamma_phi;
+        Vec3 {
+            x: -gamma2,
+            y: -gamma2,
+            z: -gamma1,
+        }
+    }
+}
 /// Hamiltonian and excitation, decay, and pure-dephasing rates for a two-level system.
 #[derive(Copy, Clone)]
 pub struct Liouvillian {
@@ -74,11 +92,11 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
         gamma_down,
         gamma_phi,
     } = liouvillian;
-    let Vec3 {
-        x: hx,
-        y: hy,
-        z: hz,
-    } = hamiltonian.r;
+    // let Vec3 {
+    //     x: hx,
+    //     y: hy,
+    //     z: hz,
+    // } = hamiltonian.r;
 
 
     let gamma1 = gamma_up + gamma_down;
@@ -128,19 +146,19 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
     //     z: d.z * w_cross.z,
     // };
 
-    //let h = hamiltonian.r;
+    let h = hamiltonian.r;
 
-    let h2 = hamiltonian.r.norm_square();
+    let h2 = h.norm_square();
 
     let w_circ = d.circ(w);
 
-    let w_cross = hamiltonian.r.cross(w);
+    let w_cross = h.cross(w);
 
     let m_w = w_circ + w_cross;
 
-    let h_dot_w = hamiltonian.r.dot(w);
+    let h_dot_w = h.dot(w);
 
-    let h_cross_w_circ = hamiltonian.r.cross(w_circ);
+    let h_cross_w_circ = h.cross(w_circ);
 
     let d_w_circ = d.circ(w_circ);
 
@@ -152,10 +170,10 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
     //     z: d_w_circ.z + d_w_cross.z + h_cross_w_circ.z + h_dot_w * hz - h2 * w.z,
     // };
 
-    let m2_w = d_w_circ + d_w_cross +  h_cross_w_circ + h_dot_w * hamiltonian.r - h2 * w;
+    let m2_w = d_w_circ + d_w_cross +  h_cross_w_circ + h_dot_w * h - h2 * w;
 
     let r = c0 * w + c1 * m_w + c2 * m2_w + rss;
-    BlochVec { r}
+    BlochVec { r }
 
     // BlochVec {
     //     r: Vec3 {
