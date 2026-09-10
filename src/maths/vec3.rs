@@ -13,7 +13,11 @@ impl Vec3 {
     }
 
     pub fn norm(self) -> f64 {
-        (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
+        self.norm_square().sqrt()
+    }
+
+    pub fn norm_square(self) -> f64 {
+        self.x * self.x + self.y * self.y + self.z * self.z
     }
 
     pub fn cross(self, other: Self) -> Self {
@@ -23,7 +27,7 @@ impl Vec3 {
             z: self.x * other.y - self.y * other.x,
         }
     }
-    
+
     pub fn circ(self, other: Self) -> Self {
         Self {
             x: self.x * other.x,

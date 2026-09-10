@@ -79,6 +79,8 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
         y: hy,
         z: hz,
     } = hamiltonian.r;
+
+
     let gamma1 = gamma_up + gamma_down;
     let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
 
@@ -86,30 +88,30 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
     let eigs = cubic_roots(sym);
     let (c0, c1, c2) = cayley_coeffs(sym, eigs, t);
 
-    let h2 = hx * hx + hy * hy + hz * hz;
+    //let h2 = hx * hx + hy * hy + hz * hz;
     let d = Vec3 {
         x: -gamma2,
         y: -gamma2,
         z: -gamma1,
     };
 
-    let w_circ = Vec3 {
-        x: d.x * w.x,
-        y: d.y * w.y,
-        z: d.z * w.z,
-    };
-    let w_cross = Vec3 {
-        x: hy * w.z - hz * w.y,
-        y: hz * w.x - hx * w.z,
-        z: hx * w.y - hy * w.x,
-    };
-    let m_w = Vec3 {
-        x: w_circ.x + w_cross.x,
-        y: w_circ.y + w_cross.y,
-        z: w_circ.z + w_cross.z,
-    };
+    // let w_circ = Vec3 {
+    //     x: d.x * w.x,
+    //     y: d.y * w.y,
+    //     z: d.z * w.z,
+    // };
+    // let w_cross = Vec3 {
+    //     x: hy * w.z - hz * w.y,
+    //     y: hz * w.x - hx * w.z,
+    //     z: hx * w.y - hy * w.x,
+    // };
+    // let m_w = Vec3 {
+    //     x: w_circ.x + w_cross.x,
+    //     y: w_circ.y + w_cross.y,
+    //     z: w_circ.z + w_cross.z,
+    // };
 
-    let h_dot_w = hx * w.x + hy * w.y + hz * w.z;
+    // let h_dot_w = hx * w.x + hy * w.y + hz * w.z;
     // let h_cross_w_circ = Vec3 {
     //     x: hy * w_circ.z - hz * w_circ.y,
     //     y: hz * w_circ.x - hx * w_circ.z,
@@ -125,6 +127,18 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
     //     y: d.y * w_cross.y,
     //     z: d.z * w_cross.z,
     // };
+
+    //let h = hamiltonian.r;
+
+    let h2 = hamiltonian.r.norm_square();
+
+    let w_circ = d.circ(w);
+
+    let w_cross = hamiltonian.r.cross(w);
+
+    let m_w = w_circ + w_cross;
+
+    let h_dot_w = hamiltonian.r.dot(w);
 
     let h_cross_w_circ = hamiltonian.r.cross(w_circ);
 
