@@ -18,27 +18,33 @@ pub struct Case {
 /// both sides of the comparison. This adapter is the place to follow API changes.
 pub fn current_params(params: &mts_reference::MtsParams) -> current::MtsParams {
     current::MtsParams {
-        mod_freq: params.mod_freq,
-        mod_depth: params.mod_depth,
-        mod_shift: params.mod_shift,
-        delta: params.delta,
-        r_pump: params.r_pump,
-        r_prbe: params.r_prbe,
-        kv: params.kv,
-        kr: params.kr,
-        frame: match params.frame {
-            mts_reference::Frame::Atom => current::Frame::Atom,
-            mts_reference::Frame::Pump => current::Frame::Pump,
-            mts_reference::Frame::Probe => current::Frame::Probe,
+        hamiltonian: current::HamiltonianParams {
+            mod_freq: params.mod_freq,
+            mod_depth: params.mod_depth,
+            mod_shift: params.mod_shift,
+            delta: params.delta,
+            r_pump: params.r_pump,
+            r_prbe: params.r_prbe,
+            kv: params.kv,
+            kr: params.kr,
+            frame: match params.frame {
+                mts_reference::Frame::Atom => current::Frame::Atom,
+                mts_reference::Frame::Pump => current::Frame::Pump,
+                mts_reference::Frame::Probe => current::Frame::Probe,
+            },
         },
-        kr_n: params.kr_n,
-        steps_per_period: params.steps_per_period,
-        n_periods: params.n_periods,
-        hz_lim: params.hz_lim,
-        hz_num: params.hz_num,
-        gamma_up: params.gamma_up,
-        gamma_down: params.gamma_down,
-        gamma_phi: params.gamma_phi,
+        decay: atomic_clocks::twolevel::Decay {
+            gamma_up: params.gamma_up,
+            gamma_down: params.gamma_down,
+            gamma_phi: params.gamma_phi,
+        },
+        solver: current::MtsSolverParams {
+            kr_n: params.kr_n,
+            steps_per_period: params.steps_per_period,
+            n_periods: params.n_periods,
+            hz_lim: params.hz_lim,
+            hz_num: params.hz_num,
+        },
     }
 }
 

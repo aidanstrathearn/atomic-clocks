@@ -28,8 +28,9 @@ impl Frame {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct MtsParams {
+/// Hamiltonian parameters for a single atom in the chosen rotating frame.
+#[derive(Clone, Copy, Debug)]
+pub struct HamiltonianParams {
     pub mod_freq: f64,
     pub mod_depth: f64,
     pub mod_shift: f64,
@@ -39,17 +40,9 @@ pub struct MtsParams {
     pub kv: f64,
     pub kr: f64,
     pub frame: Frame,
-    pub kr_n: usize,
-    pub steps_per_period: usize,
-    pub n_periods: usize,
-    pub hz_lim: f64,
-    pub hz_num: usize,
-    pub gamma_up: f64,
-    pub gamma_down: f64,
-    pub gamma_phi: f64,
 }
 
-impl Default for MtsParams {
+impl Default for HamiltonianParams {
     fn default() -> Self {
         Self {
             mod_freq: 1.0,
@@ -61,14 +54,49 @@ impl Default for MtsParams {
             kv: 0.0,
             kr: 0.0,
             frame: Frame::Probe,
+        }
+    }
+}
+
+/// Spatial sampling, integration grid, and detuning scan settings for MTS.
+#[derive(Clone, Copy, Debug)]
+pub struct MtsSolverParams {
+    pub kr_n: usize,
+    pub steps_per_period: usize,
+    pub n_periods: usize,
+    pub hz_lim: f64,
+    pub hz_num: usize,
+}
+
+impl Default for MtsSolverParams {
+    fn default() -> Self {
+        Self {
             kr_n: 5,
             steps_per_period: 100,
             n_periods: 3,
             hz_lim: 5.0,
             hz_num: 50,
-            gamma_up: 0.0,
-            gamma_down: 1.0,
-            gamma_phi: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MtsParams {
+    pub hamiltonian: HamiltonianParams,
+    pub decay: Decay,
+    pub solver: MtsSolverParams,
+}
+
+impl Default for MtsParams {
+    fn default() -> Self {
+        Self {
+            hamiltonian: HamiltonianParams::default(),
+            decay: Decay {
+                gamma_up: 0.0,
+                gamma_down: 1.0,
+                gamma_phi: 0.0,
+            },
+            solver: MtsSolverParams::default(),
         }
     }
 }
@@ -87,16 +115,20 @@ pub struct DemodOutput {
 pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
     validate_params(params)?;
 
-    let period = 2.0 * PI / params.mod_freq.max(1e-6);
-    let time_samples = params.n_periods * params.steps_per_period;
-    let t_array = linspace(0.0, params.n_periods as f64 * period, time_samples);
-    let hz_array = linspace(-params.hz_lim, params.hz_lim, params.hz_num);
+    let period = 2.0 * PI / params.hamiltonian.mod_freq.max(1e-6);
+    let time_samples = params.solver.n_periods * params.solver.steps_per_period;
+    let t_array = linspace(0.0, params.solver.n_periods as f64 * period, time_samples);
+    let hz_array = linspace(
+        -params.solver.hz_lim,
+        params.solver.hz_lim,
+        params.solver.hz_num,
+    );
     let last_start = last_period_start(&t_array, period);
     let t_last = &t_array[last_start..];
     let last_period_samples = t_last.len();
 
-    let kr_array = kr_array(params.kr_n, params.kr);
-    let kr_harmonic = match params.frame {
+    let kr_array = kr_array(params.solver.kr_n, params.hamiltonian.kr);
+    let kr_harmonic = match params.hamiltonian.frame {
         Frame::Probe => 1.0,
         Frame::Atom => 0.0,
         Frame::Pump => -1.0,
@@ -120,7 +152,8 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
 
         for &kr_phase in &kr_array {
             accumulate_projected_trajectory(
-                params,
+                &params.hamiltonian,
+                params.decay,
                 &t_array,
                 last_start,
                 hz_offset,
@@ -141,7 +174,7 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
         amp0.push(out_amp0);
         proj0.push(out_amp0);
 
-        let (raw_amp1, phase1) = lockin(&projected, t_last, params.mod_freq);
+        let (raw_amp1, phase1) = lockin(&projected, t_last, params.hamiltonian.mod_freq);
         let hz_sign = -np_sign(hz_offset);
         let out_amp1 = raw_amp1 * hz_sign;
         let out_cos1 = phase1.cos() * hz_sign;
@@ -161,22 +194,22 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
 }
 
 fn validate_params(params: &MtsParams) -> Result<(), String> {
-    if !params.mod_freq.is_finite() || params.mod_freq <= 0.0 {
+    if !params.hamiltonian.mod_freq.is_finite() || params.hamiltonian.mod_freq <= 0.0 {
         return Err("mod_freq must be positive and finite".to_string());
     }
-    if params.kr_n == 0 {
+    if params.solver.kr_n == 0 {
         return Err("kr_n must be positive".to_string());
     }
-    if params.n_periods == 0 {
+    if params.solver.n_periods == 0 {
         return Err("n_periods must be positive".to_string());
     }
-    if params.steps_per_period == 0 {
+    if params.solver.steps_per_period == 0 {
         return Err("steps_per_period must be positive".to_string());
     }
-    if params.n_periods * params.steps_per_period < 2 {
+    if params.solver.n_periods * params.solver.steps_per_period < 2 {
         return Err("time grid must contain at least two samples".to_string());
     }
-    if params.hz_num == 0 {
+    if params.solver.hz_num == 0 {
         return Err("hz_num must be positive".to_string());
     }
     Ok(())
@@ -218,7 +251,8 @@ fn np_sign(value: f64) -> f64 {
 
 #[allow(clippy::too_many_arguments)]
 fn accumulate_projected_trajectory(
-    params: &MtsParams,
+    params: &HamiltonianParams,
+    decay: Decay,
     t_array: &[f64],
     last_start: usize,
     hz_offset: f64,
@@ -228,11 +262,6 @@ fn accumulate_projected_trajectory(
     projected: &mut [f64],
 ) {
     let mut state = BlochVec::ground();
-    let decay = Decay {
-        gamma_up: params.gamma_up,
-        gamma_down: params.gamma_down,
-        gamma_phi: params.gamma_phi,
-    };
 
     for idx in 0..t_array.len() {
         if idx >= last_start {
@@ -244,17 +273,14 @@ fn accumulate_projected_trajectory(
 
         let hamiltonian =
             pump_probe_hamiltonian_sample(params, t_array[idx], hz_offset, kr_phase, kr_harmonic);
-        let liouvillian = Liouvillian {
-            hamiltonian,
-            decay,
-        };
+        let liouvillian = Liouvillian { hamiltonian, decay };
         let dt = t_array[idx + 1] - t_array[idx];
         state = propagate(liouvillian, state, dt);
     }
 }
 
 fn pump_probe_hamiltonian_sample(
-    params: &MtsParams,
+    params: &HamiltonianParams,
     t: f64,
     hz_offset: f64,
     kr_phase: f64,
@@ -334,7 +360,10 @@ mod tests {
     fn rejects_invalid_modulation_frequency() {
         for mod_freq in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let params = MtsParams {
-                mod_freq,
+                hamiltonian: HamiltonianParams {
+                    mod_freq,
+                    ..HamiltonianParams::default()
+                },
                 ..MtsParams::default()
             };
             assert_eq!(
@@ -348,12 +377,15 @@ mod tests {
     fn default_scan_is_finite_in_every_frame() {
         for frame in [Frame::Pump, Frame::Atom, Frame::Probe] {
             let params = MtsParams {
-                frame,
+                hamiltonian: HamiltonianParams {
+                    frame,
+                    ..HamiltonianParams::default()
+                },
                 ..MtsParams::default()
             };
             let output = compute_demod(&params).expect("default scan succeeds");
             for values in [&output.hz, &output.amp0, &output.amp1, &output.proj1] {
-                assert_eq!(values.len(), params.hz_num);
+                assert_eq!(values.len(), params.solver.hz_num);
                 assert!(values.iter().all(|value| value.is_finite()), "{frame:?}");
             }
         }
@@ -415,23 +447,23 @@ mod tests {
 
     fn set_param(params: &mut MtsParams, name: &str, value: &str) {
         match name {
-            "mod_freq" => params.mod_freq = parse_f64(value),
-            "mod_depth" => params.mod_depth = parse_f64(value),
-            "mod_shift" => params.mod_shift = parse_f64(value),
-            "delta" => params.delta = parse_f64(value),
-            "r_pump" => params.r_pump = parse_f64(value),
-            "r_prbe" => params.r_prbe = parse_f64(value),
-            "kv" => params.kv = parse_f64(value),
-            "kr" => params.kr = parse_f64(value),
-            "frame" => params.frame = Frame::parse(value).expect("valid frame"),
-            "kr_n" => params.kr_n = parse_usize(value),
-            "steps_per_period" => params.steps_per_period = parse_usize(value),
-            "n_periods" => params.n_periods = parse_usize(value),
-            "hz_lim" => params.hz_lim = parse_f64(value),
-            "hz_num" => params.hz_num = parse_usize(value),
-            "gamma_up" => params.gamma_up = parse_f64(value),
-            "gamma_down" => params.gamma_down = parse_f64(value),
-            "gamma_phi" => params.gamma_phi = parse_f64(value),
+            "mod_freq" => params.hamiltonian.mod_freq = parse_f64(value),
+            "mod_depth" => params.hamiltonian.mod_depth = parse_f64(value),
+            "mod_shift" => params.hamiltonian.mod_shift = parse_f64(value),
+            "delta" => params.hamiltonian.delta = parse_f64(value),
+            "r_pump" => params.hamiltonian.r_pump = parse_f64(value),
+            "r_prbe" => params.hamiltonian.r_prbe = parse_f64(value),
+            "kv" => params.hamiltonian.kv = parse_f64(value),
+            "kr" => params.hamiltonian.kr = parse_f64(value),
+            "frame" => params.hamiltonian.frame = Frame::parse(value).expect("valid frame"),
+            "kr_n" => params.solver.kr_n = parse_usize(value),
+            "steps_per_period" => params.solver.steps_per_period = parse_usize(value),
+            "n_periods" => params.solver.n_periods = parse_usize(value),
+            "hz_lim" => params.solver.hz_lim = parse_f64(value),
+            "hz_num" => params.solver.hz_num = parse_usize(value),
+            "gamma_up" => params.decay.gamma_up = parse_f64(value),
+            "gamma_down" => params.decay.gamma_down = parse_f64(value),
+            "gamma_phi" => params.decay.gamma_phi = parse_f64(value),
             _ => panic!("unknown fixture param '{name}'"),
         }
     }

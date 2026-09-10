@@ -2,7 +2,7 @@ use crate::maths::complex::Complex;
 
 use super::{BlochVec, Hamiltonian, Vec3};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Decay {
     pub gamma_up: f64,
     pub gamma_down: f64,
