@@ -1,5 +1,6 @@
 //! Shared cases and comparisons for the frozen MTS solver and the live library.
 
+use atomic_clocks::maths::demodulation::ModulationParams;
 use atomic_clocks::vapourcell as current;
 
 // Keep the snapshot unchanged, including helpers unused by the benchmark binary.
@@ -19,7 +20,7 @@ pub struct Case {
 pub fn current_params(params: &mts_reference::MtsParams) -> current::MtsParams {
     current::MtsParams {
         hamiltonian: current::HamiltonianParams {
-            modulation: current::ModulationParams {
+            modulation: ModulationParams {
                 frequency: params.mod_freq,
                 depth: params.mod_depth,
                 shift: params.mod_shift,

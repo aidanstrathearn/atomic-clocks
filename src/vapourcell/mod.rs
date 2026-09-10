@@ -1,5 +1,6 @@
 use std::f64::consts::PI;
 
+use crate::maths::demodulation::{ModulationParams, lockin};
 use crate::twolevel::{BlochVec, Decay, Hamiltonian, Liouvillian, Vec3, propagate};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,45 +26,6 @@ impl Frame {
             Self::Pump => "pump",
             Self::Probe => "probe",
         }
-    }
-}
-
-/// Sinusoidal phase modulation with a constant frequency shift.
-/// `frequency` must be positive for the modulation index and phase to be defined.
-#[derive(Clone, Copy, Debug)]
-pub struct ModulationParams {
-    /// Modulation angular frequency, in radians per unit time.
-    pub frequency: f64,
-    /// Angular-frequency deviation amplitude, in radians per unit time.
-    pub depth: f64,
-    /// Constant angular-frequency shift, in radians per unit time.
-    pub shift: f64,
-}
-
-impl Default for ModulationParams {
-    fn default() -> Self {
-        Self {
-            frequency: 1.0,
-            depth: 1.0,
-            shift: 0.0,
-        }
-    }
-}
-
-impl ModulationParams {
-    /// Dimensionless phase-modulation amplitude.
-    pub fn mod_index(&self) -> f64 {
-        self.depth / self.frequency
-    }
-
-    /// Modulation phase in radians, including the linear phase from `shift`.
-    pub fn phase(&self, t: f64) -> f64 {
-        self.mod_index() * (self.frequency * t).cos() + self.shift * t
-    }
-
-    /// Instantaneous angular-frequency offset: the time derivative of `phase(t)`.
-    pub fn freq(&self, t: f64) -> f64 {
-        -self.depth * (self.frequency * t).sin() + self.shift
     }
 }
 
@@ -204,16 +166,15 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
             *value *= kr_scale;
         }
 
-        let (raw_amp0, _) = lockin(&projected, t_last, 0.0);
-        let out_amp0 = raw_amp0 / 2.0;
+        let dc = lockin(&projected, t_last, 0.0);
+        let out_amp0 = dc.amplitude() / 2.0;
         amp0.push(out_amp0);
         proj0.push(out_amp0);
 
-        let (raw_amp1, phase1) =
-            lockin(&projected, t_last, params.hamiltonian.modulation.frequency);
+        let harmonic = lockin(&projected, t_last, params.hamiltonian.modulation.frequency);
         let hz_sign = -np_sign(hz_offset);
-        let out_amp1 = raw_amp1 * hz_sign;
-        let out_cos1 = phase1.cos() * hz_sign;
+        let out_amp1 = harmonic.amplitude() * hz_sign;
+        let out_cos1 = harmonic.phase().cos() * hz_sign;
         amp1.push(out_amp1);
         proj1.push(out_amp1 * out_cos1);
     }
@@ -344,32 +305,6 @@ fn pump_probe_hamiltonian_sample(
         params.r_pump * pu_phase.sin() + params.r_prbe * pr_phase.sin(),
         hz_base + hz_offset,
     )
-}
-
-fn lockin(traj: &[f64], t_array: &[f64], freq: f64) -> (f64, f64) {
-    let t_total = t_array[t_array.len() - 1] - t_array[0];
-    let mut x_integral = 0.0;
-    let mut y_integral = 0.0;
-
-    for idx in 0..(traj.len() - 1) {
-        let t0 = t_array[idx];
-        let t1 = t_array[idx + 1];
-        let dt = t1 - t0;
-
-        let x0 = traj[idx] * (freq * t0).cos();
-        let x1 = traj[idx + 1] * (freq * t1).cos();
-        x_integral += 0.5 * (x0 + x1) * dt;
-
-        let y0 = traj[idx] * (freq * t0).sin();
-        let y1 = traj[idx + 1] * (freq * t1).sin();
-        y_integral += 0.5 * (y0 + y1) * dt;
-    }
-
-    let x_val = x_integral / t_total;
-    let y_val = y_integral / t_total;
-    let amplitude = 2.0 * (x_val * x_val + y_val * y_val).sqrt();
-    let phase = y_val.atan2(x_val);
-    (amplitude, phase)
 }
 
 #[cfg(test)]
