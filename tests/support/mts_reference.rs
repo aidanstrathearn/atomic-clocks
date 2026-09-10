@@ -253,12 +253,12 @@ fn pump_probe_hamiltonian_sample(
 ) -> [f64; 3] {
     let mod_index = params.mod_depth / params.mod_freq;
     let phase = mod_index * (params.mod_freq * t).cos() + params.mod_shift * t;
-    let freq = params.mod_depth * (params.mod_freq * t).sin() + params.mod_shift;
+    let freq = -params.mod_depth * (params.mod_freq * t).sin() + params.mod_shift;
     let kvt = t * params.kv;
 
     let (hz_base, pump_phase, probe_phase) = match params.frame {
         Frame::Atom => (params.delta, kvt + phase, -kvt),
-        Frame::Pump => (params.delta - params.kv + freq, 0.0, -2.0 * kvt - phase),
+        Frame::Pump => (params.delta - params.kv - freq, 0.0, -2.0 * kvt - phase),
         Frame::Probe => (params.delta + params.kv, 2.0 * kvt + phase, 0.0),
     };
 
@@ -527,12 +527,12 @@ mod tests {
 
     #[test]
     fn baseline_fixture_matches_python() {
-        assert_fixture(include_str!("fixtures/baseline.fixture"));
+        assert_legacy_python_fixture(include_str!("fixtures/baseline.fixture"));
     }
 
     #[test]
-    fn pump_shifted_fixture_matches_python() {
-        assert_fixture(include_str!("fixtures/pump_shifted.fixture"));
+    fn pump_shifted_fixture_matches_python_with_detuning_adjustment() {
+        assert_legacy_python_fixture(include_str!("fixtures/pump_shifted.fixture"));
     }
 
     #[test]
@@ -564,8 +564,15 @@ mod tests {
         }
     }
 
-    fn assert_fixture(text: &str) {
-        let fixture = parse_fixture(text);
+    fn assert_legacy_python_fixture(text: &str) {
+        let mut fixture = parse_fixture(text);
+        if fixture.params.frame == Frame::Pump {
+            // Legacy Python used +mod_shift in pump-frame hz; the corrected
+            // frame transformation uses -mod_shift. Increasing delta by twice
+            // the shift reproduces the fixture Hamiltonian without changing
+            // the scan offsets or their demodulation sign convention.
+            fixture.params.delta += 2.0 * fixture.params.mod_shift;
+        }
         let output = compute_demod(&fixture.params).expect("compute_demod succeeds");
         assert_close("hz", &output.hz, fixture.array("hz"), 2e-8, 2e-10);
         assert_close("amp0", &output.amp0, fixture.array("amp0"), 2e-8, 2e-10);

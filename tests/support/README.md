@@ -1,12 +1,23 @@
 # MTS reference and A/B comparison
 
-`mts_reference.rs` is an exact copy of `src/vapourcell/mod.rs` from commit
+`mts_reference.rs` was copied from `src/vapourcell/mod.rs` at commit
 `9153052937b574f82097d909153ea63c4d176b16`, before integrating MTS with `twolevel`.
-Its SHA-256 is `89b5791e797defac7344c558879d5eb2f13efae2fd7014cb7c10d83f6f4648af`.
+The original snapshot's SHA-256 was `89b5791e797defac7344c558879d5eb2f13efae2fd7014cb7c10d83f6f4648af`.
 The two Python fixtures in `fixtures/` were copied with it so its existing tests
 continue to work independently of the production fixture paths.
 
-Keep the snapshot and these fixture copies frozen. It includes its own types,
+The reference has one intentional physics correction shared with production:
+`freq = phase'(t)` and pump-frame `hz = delta - kv - freq`. This changes the
+longitudinal `mod_shift` contribution from positive to negative. The Python
+fixtures retain the original convention; both fixture test helpers add
+`2 * mod_shift` to `delta` for Pump-frame fixtures to reproduce their original
+Hamiltonian. For `pump_shifted`, this means testing at `delta = 0.7` instead of
+`0.4`. Scan offsets, demodulation signs, expected arrays, and tolerances are
+unchanged. The normal A/B scans use identical, unadjusted physical parameters
+with the corrected convention in both implementations.
+
+Apart from this documented correction and fixture adaptation, keep the reference
+and these fixture copies frozen. It includes its own types,
 defaults, numerical helpers, and demodulation conventions, including the imposed
 sign and exact-zero behaviour. Do not regenerate it from the working solver or
 make it call refactored library helpers. Update the adapter in `mod.rs` when the
