@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use crate::twolevel::{BlochVec, Hamiltonian, Liouvillian, Vec3, propagate};
+use crate::twolevel::{BlochVec, Decay, Hamiltonian, Liouvillian, Vec3, propagate};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Frame {
@@ -228,6 +228,11 @@ fn accumulate_projected_trajectory(
     projected: &mut [f64],
 ) {
     let mut state = BlochVec::ground();
+    let decay = Decay {
+        gamma_up: params.gamma_up,
+        gamma_down: params.gamma_down,
+        gamma_phi: params.gamma_phi,
+    };
 
     for idx in 0..t_array.len() {
         if idx >= last_start {
@@ -241,9 +246,7 @@ fn accumulate_projected_trajectory(
             pump_probe_hamiltonian_sample(params, t_array[idx], hz_offset, kr_phase, kr_harmonic);
         let liouvillian = Liouvillian {
             hamiltonian,
-            gamma_up: params.gamma_up,
-            gamma_down: params.gamma_down,
-            gamma_phi: params.gamma_phi,
+            decay,
         };
         let dt = t_array[idx + 1] - t_array[idx];
         state = propagate(liouvillian, state, dt);

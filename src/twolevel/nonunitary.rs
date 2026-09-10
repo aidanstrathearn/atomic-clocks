@@ -17,9 +17,8 @@ impl Decay {
     pub fn gamma2(self) -> f64 {
         0.5 * self.gamma1() + self.gamma_phi
     }
+
     pub fn bloch_diagonal(self) -> Vec3 {
-        let gamma1 = self.gamma_up + self.gamma_down;
-        let gamma2 = 0.5 * (self.gamma_up + self.gamma_down) + self.gamma_phi;
         Vec3 {
             x: -self.gamma2(),
             y: -self.gamma2(),
@@ -28,27 +27,22 @@ impl Decay {
     }
 }
 
-
 /// Hamiltonian and excitation, decay, and pure-dephasing rates for a two-level system.
 #[derive(Copy, Clone)]
 pub struct Liouvillian {
     pub hamiltonian: Hamiltonian,
-    pub gamma_up: f64,
-    pub gamma_down: f64,
-    pub gamma_phi: f64,
+    pub decay: Decay,
 }
 
 fn r_ss(liouvillian: Liouvillian) -> BlochVec {
     let Liouvillian {
         hamiltonian,
-        gamma_up,
-        gamma_down,
-        gamma_phi,
+        decay,
     } = liouvillian;
     let h = hamiltonian.r;
-    let gamma1 = gamma_up + gamma_down;
-    let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
-    let numerator = gamma_up - gamma_down;
+    let gamma1 = decay.gamma1();
+    let gamma2 = decay.gamma2();
+    let numerator = decay.gamma_up - decay.gamma_down;
     let denominator = gamma1 * (gamma2 * gamma2 + h.z * h.z) + gamma2 * (h.x * h.x + h.y * h.y);
 
     let v0 = h.x * h.z + h.y * gamma2;
@@ -68,17 +62,15 @@ fn r_ss(liouvillian: Liouvillian) -> BlochVec {
 fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
     let Liouvillian {
         hamiltonian,
-        gamma_up,
-        gamma_down,
-        gamma_phi,
+        decay,
     } = liouvillian;
     // let Vec3 {
     //     x: hx,
     //     y: hy,
     //     z: hz,
     // } = hamiltonian.r;
-    let gamma1 = gamma_up + gamma_down;
-    let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
+    let gamma1 = decay.gamma1();
+    let gamma2 = decay.gamma2();
     //let h2 = hx * hx + hy * hy + hz * hz;
     let h = hamiltonian.r;
     let h2 = h.norm_square();
@@ -95,30 +87,19 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
 
     let Liouvillian {
         hamiltonian,
-        gamma_up,
-        gamma_down,
-        gamma_phi,
+        decay,
     } = liouvillian;
     // let Vec3 {
     //     x: hx,
     //     y: hy,
     //     z: hz,
     // } = hamiltonian.r;
-
-
-    let gamma1 = gamma_up + gamma_down;
-    let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
-
     let sym = symmetric_polynomials(liouvillian);
     let eigs = cubic_roots(sym);
     let (c0, c1, c2) = cayley_coeffs(sym, eigs, t);
 
     //let h2 = hx * hx + hy * hy + hz * hz;
-    let d = Vec3 {
-        x: -gamma2,
-        y: -gamma2,
-        z: -gamma1,
-    };
+    let d = decay.bloch_diagonal();
 
     // let w_circ = Vec3 {
     //     x: d.x * w.x,
