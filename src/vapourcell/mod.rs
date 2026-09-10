@@ -28,12 +28,49 @@ impl Frame {
     }
 }
 
+/// Sinusoidal phase modulation with a constant frequency shift.
+/// `frequency` must be positive for the modulation index and phase to be defined.
+#[derive(Clone, Copy, Debug)]
+pub struct ModulationParams {
+    /// Modulation angular frequency, in radians per unit time.
+    pub frequency: f64,
+    /// Angular-frequency deviation amplitude, in radians per unit time.
+    pub depth: f64,
+    /// Constant angular-frequency shift, in radians per unit time.
+    pub shift: f64,
+}
+
+impl Default for ModulationParams {
+    fn default() -> Self {
+        Self {
+            frequency: 1.0,
+            depth: 1.0,
+            shift: 0.0,
+        }
+    }
+}
+
+impl ModulationParams {
+    /// Dimensionless phase-modulation amplitude.
+    pub fn mod_index(&self) -> f64 {
+        self.depth / self.frequency
+    }
+
+    /// Modulation phase in radians, including the linear phase from `shift`.
+    pub fn phase(&self, t: f64) -> f64 {
+        self.mod_index() * (self.frequency * t).cos() + self.shift * t
+    }
+
+    /// Instantaneous angular-frequency offset: the time derivative of `phase(t)`.
+    pub fn freq(&self, t: f64) -> f64 {
+        -self.depth * (self.frequency * t).sin() + self.shift
+    }
+}
+
 /// Hamiltonian parameters for a single atom in the chosen rotating frame.
 #[derive(Clone, Copy, Debug)]
 pub struct HamiltonianParams {
-    pub mod_freq: f64,
-    pub mod_depth: f64,
-    pub mod_shift: f64,
+    pub modulation: ModulationParams,
     pub delta: f64,
     pub r_pump: f64,
     pub r_prbe: f64,
@@ -45,9 +82,7 @@ pub struct HamiltonianParams {
 impl Default for HamiltonianParams {
     fn default() -> Self {
         Self {
-            mod_freq: 1.0,
-            mod_depth: 1.0,
-            mod_shift: 0.0,
+            modulation: ModulationParams::default(),
             delta: 0.0,
             r_pump: 1.0,
             r_prbe: 0.1,
@@ -115,7 +150,7 @@ pub struct DemodOutput {
 pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
     validate_params(params)?;
 
-    let period = 2.0 * PI / params.hamiltonian.mod_freq.max(1e-6);
+    let period = 2.0 * PI / params.hamiltonian.modulation.frequency.max(1e-6);
     let time_samples = params.solver.n_periods * params.solver.steps_per_period;
     let t_array = linspace(0.0, params.solver.n_periods as f64 * period, time_samples);
     let hz_array = linspace(
@@ -174,7 +209,8 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
         amp0.push(out_amp0);
         proj0.push(out_amp0);
 
-        let (raw_amp1, phase1) = lockin(&projected, t_last, params.hamiltonian.mod_freq);
+        let (raw_amp1, phase1) =
+            lockin(&projected, t_last, params.hamiltonian.modulation.frequency);
         let hz_sign = -np_sign(hz_offset);
         let out_amp1 = raw_amp1 * hz_sign;
         let out_cos1 = phase1.cos() * hz_sign;
@@ -194,7 +230,9 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
 }
 
 fn validate_params(params: &MtsParams) -> Result<(), String> {
-    if !params.hamiltonian.mod_freq.is_finite() || params.hamiltonian.mod_freq <= 0.0 {
+    if !params.hamiltonian.modulation.frequency.is_finite()
+        || params.hamiltonian.modulation.frequency <= 0.0
+    {
         return Err("mod_freq must be positive and finite".to_string());
     }
     if params.solver.kr_n == 0 {
@@ -286,9 +324,8 @@ fn pump_probe_hamiltonian_sample(
     kr_phase: f64,
     kr_harmonic: f64,
 ) -> Hamiltonian {
-    let mod_index = params.mod_depth / params.mod_freq;
-    let phase = mod_index * (params.mod_freq * t).cos() + params.mod_shift * t;
-    let freq = -params.mod_depth * (params.mod_freq * t).sin() + params.mod_shift;
+    let phase = params.modulation.phase(t);
+    let freq = params.modulation.freq(t);
     let kvt = t * params.kv;
 
     let (hz_base, pump_phase, probe_phase) = match params.frame {
@@ -361,7 +398,10 @@ mod tests {
         for mod_freq in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let params = MtsParams {
                 hamiltonian: HamiltonianParams {
-                    mod_freq,
+                    modulation: ModulationParams {
+                        frequency: mod_freq,
+                        ..ModulationParams::default()
+                    },
                     ..HamiltonianParams::default()
                 },
                 ..MtsParams::default()
@@ -398,7 +438,7 @@ mod tests {
             // frame transformation uses -mod_shift. Increasing delta by twice
             // the shift reproduces the fixture Hamiltonian without changing
             // the scan offsets or their demodulation sign convention.
-            fixture.params.hamiltonian.delta += 2.0 * fixture.params.hamiltonian.mod_shift;
+            fixture.params.hamiltonian.delta += 2.0 * fixture.params.hamiltonian.modulation.shift;
         }
         let output = compute_demod(&fixture.params).expect("compute_demod succeeds");
         assert_close("hz", &output.hz, fixture.array("hz"), 2e-8, 2e-10);
@@ -454,9 +494,9 @@ mod tests {
 
     fn set_param(params: &mut MtsParams, name: &str, value: &str) {
         match name {
-            "mod_freq" => params.hamiltonian.mod_freq = parse_f64(value),
-            "mod_depth" => params.hamiltonian.mod_depth = parse_f64(value),
-            "mod_shift" => params.hamiltonian.mod_shift = parse_f64(value),
+            "mod_freq" => params.hamiltonian.modulation.frequency = parse_f64(value),
+            "mod_depth" => params.hamiltonian.modulation.depth = parse_f64(value),
+            "mod_shift" => params.hamiltonian.modulation.shift = parse_f64(value),
             "delta" => params.hamiltonian.delta = parse_f64(value),
             "r_pump" => params.hamiltonian.r_pump = parse_f64(value),
             "r_prbe" => params.hamiltonian.r_prbe = parse_f64(value),

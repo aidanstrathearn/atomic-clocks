@@ -19,9 +19,11 @@ pub struct Case {
 pub fn current_params(params: &mts_reference::MtsParams) -> current::MtsParams {
     current::MtsParams {
         hamiltonian: current::HamiltonianParams {
-            mod_freq: params.mod_freq,
-            mod_depth: params.mod_depth,
-            mod_shift: params.mod_shift,
+            modulation: current::ModulationParams {
+                frequency: params.mod_freq,
+                depth: params.mod_depth,
+                shift: params.mod_shift,
+            },
             delta: params.delta,
             r_pump: params.r_pump,
             r_prbe: params.r_prbe,
