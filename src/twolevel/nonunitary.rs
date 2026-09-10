@@ -64,14 +64,9 @@ fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
         hamiltonian,
         decay,
     } = liouvillian;
-    // let Vec3 {
-    //     x: hx,
-    //     y: hy,
-    //     z: hz,
-    // } = hamiltonian.r;
+
     let gamma1 = decay.gamma1();
     let gamma2 = decay.gamma2();
-    //let h2 = hx * hx + hy * hy + hz * hz;
     let h = hamiltonian.r;
     let h2 = h.norm_square();
     let a1 = gamma1 + 2.0 * gamma2;
@@ -89,50 +84,12 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
         hamiltonian,
         decay,
     } = liouvillian;
-    // let Vec3 {
-    //     x: hx,
-    //     y: hy,
-    //     z: hz,
-    // } = hamiltonian.r;
+
     let sym = symmetric_polynomials(liouvillian);
     let eigs = cubic_roots(sym);
     let (c0, c1, c2) = cayley_coeffs(sym, eigs, t);
 
-    //let h2 = hx * hx + hy * hy + hz * hz;
     let d = decay.bloch_diagonal();
-
-    // let w_circ = Vec3 {
-    //     x: d.x * w.x,
-    //     y: d.y * w.y,
-    //     z: d.z * w.z,
-    // };
-    // let w_cross = Vec3 {
-    //     x: hy * w.z - hz * w.y,
-    //     y: hz * w.x - hx * w.z,
-    //     z: hx * w.y - hy * w.x,
-    // };
-    // let m_w = Vec3 {
-    //     x: w_circ.x + w_cross.x,
-    //     y: w_circ.y + w_cross.y,
-    //     z: w_circ.z + w_cross.z,
-    // };
-
-    // let h_dot_w = hx * w.x + hy * w.y + hz * w.z;
-    // let h_cross_w_circ = Vec3 {
-    //     x: hy * w_circ.z - hz * w_circ.y,
-    //     y: hz * w_circ.x - hx * w_circ.z,
-    //     z: hx * w_circ.y - hy * w_circ.x,
-    // };
-    // let d_w_circ = Vec3 {
-    //     x: d.x * w_circ.x,
-    //     y: d.y * w_circ.y,
-    //     z: d.z * w_circ.z,
-    // };
-    // let d_w_cross = Vec3 {
-    //     x: d.x * w_cross.x,
-    //     y: d.y * w_cross.y,
-    //     z: d.z * w_cross.z,
-    // };
 
     let h = hamiltonian.r;
 
@@ -152,24 +109,12 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
 
     let d_w_cross = d.circ(w_cross);
 
-    // let m2_w = Vec3 {
-    //     x: d_w_circ.x + d_w_cross.x + h_cross_w_circ.x + h_dot_w * hx - h2 * w.x,
-    //     y: d_w_circ.y + d_w_cross.y + h_cross_w_circ.y + h_dot_w * hy - h2 * w.y,
-    //     z: d_w_circ.z + d_w_cross.z + h_cross_w_circ.z + h_dot_w * hz - h2 * w.z,
-    // };
 
     let m2_w = d_w_circ + d_w_cross +  h_cross_w_circ + h_dot_w * h - h2 * w;
 
     let r = c0 * w + c1 * m_w + c2 * m2_w + rss;
     BlochVec { r }
 
-    // BlochVec {
-    //     r: Vec3 {
-    //         x: c0 * w.x + c1 * m_w.x + c2 * m2_w.x + rss.x,
-    //         y: c0 * w.y + c1 * m_w.y + c2 * m2_w.y + rss.y,
-    //         z: c0 * w.z + c1 * m_w.z + c2 * m2_w.z + rss.z,
-    //     },
-    // }
 }
 
 fn cubic_roots((a1, a2, a3): (f64, f64, f64)) -> [Complex; 3] {
