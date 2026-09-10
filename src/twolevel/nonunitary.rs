@@ -10,16 +10,25 @@ pub struct Decay {
 }
 
 impl Decay {
+    pub fn gamma1(self) -> f64 {
+        self.gamma_up + self.gamma_down
+    }
+
+    pub fn gamma2(self) -> f64 {
+        0.5 * self.gamma1() + self.gamma_phi
+    }
     pub fn bloch_diagonal(self) -> Vec3 {
         let gamma1 = self.gamma_up + self.gamma_down;
         let gamma2 = 0.5 * (self.gamma_up + self.gamma_down) + self.gamma_phi;
         Vec3 {
-            x: -gamma2,
-            y: -gamma2,
-            z: -gamma1,
+            x: -self.gamma2(),
+            y: -self.gamma2(),
+            z: -self.gamma1(),
         }
     }
 }
+
+
 /// Hamiltonian and excitation, decay, and pure-dephasing rates for a two-level system.
 #[derive(Copy, Clone)]
 pub struct Liouvillian {
@@ -67,17 +76,19 @@ fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
         gamma_down,
         gamma_phi,
     } = liouvillian;
-    let Vec3 {
-        x: hx,
-        y: hy,
-        z: hz,
-    } = hamiltonian.r;
+    // let Vec3 {
+    //     x: hx,
+    //     y: hy,
+    //     z: hz,
+    // } = hamiltonian.r;
     let gamma1 = gamma_up + gamma_down;
     let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
-    let h2 = hx * hx + hy * hy + hz * hz;
+    //let h2 = hx * hx + hy * hy + hz * hz;
+    let h = hamiltonian.r;
+    let h2 = h.norm_square();
     let a1 = gamma1 + 2.0 * gamma2;
     let a2 = 2.0 * gamma1 * gamma2 + gamma2 * gamma2 + h2;
-    let a3 = hz * hz * gamma1 + gamma2 * (hx * hx + hy * hy + gamma1 * gamma2);
+    let a3 = h.z * h.z * gamma1 + gamma2 * (h.x * h.x + h.y * h.y + gamma1 * gamma2);
     (a1, a2, a3)
 }
 
