@@ -1,5 +1,7 @@
 use std::f64::consts::PI;
 
+use crate::twolevel::{Hamiltonian, Liouvillian, Vec3};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Frame {
     Atom,
@@ -225,7 +227,6 @@ fn accumulate_projected_trajectory(
     rot: [f64; 3],
     projected: &mut [f64],
 ) {
-    let rates = [params.gamma_up, params.gamma_down, params.gamma_phi];
     let mut state = [0.0, 0.0, -1.0];
 
     for idx in 0..t_array.len() {
@@ -237,10 +238,16 @@ fn accumulate_projected_trajectory(
             break;
         }
 
-        let h_eff =
+        let hamiltonian =
             pump_probe_hamiltonian_sample(params, t_array[idx], hz_offset, kr_phase, kr_harmonic);
+        let liouvillian = Liouvillian {
+            hamiltonian,
+            gamma_up: params.gamma_up,
+            gamma_down: params.gamma_down,
+            gamma_phi: params.gamma_phi,
+        };
         let dt = t_array[idx + 1] - t_array[idx];
-        state = propagate(h_eff, rates, state, dt);
+        state = propagate(liouvillian, state, dt);
     }
 }
 
@@ -250,7 +257,7 @@ fn pump_probe_hamiltonian_sample(
     hz_offset: f64,
     kr_phase: f64,
     kr_harmonic: f64,
-) -> [f64; 3] {
+) -> Hamiltonian {
     let mod_index = params.mod_depth / params.mod_freq;
     let phase = mod_index * (params.mod_freq * t).cos() + params.mod_shift * t;
     let freq = params.mod_depth * (params.mod_freq * t).sin() + params.mod_shift;
@@ -267,11 +274,11 @@ fn pump_probe_hamiltonian_sample(
     let pu_phase = pump_phase + pump_kr;
     let pr_phase = probe_phase + probe_kr;
 
-    [
+    Hamiltonian::new(
         params.r_pump * pu_phase.cos() + params.r_prbe * pr_phase.cos(),
         params.r_pump * pu_phase.sin() + params.r_prbe * pr_phase.sin(),
         hz_base + hz_offset,
-    ]
+    )
 }
 
 fn lockin(traj: &[f64], t_array: &[f64], freq: f64) -> (f64, f64) {
@@ -300,8 +307,18 @@ fn lockin(traj: &[f64], t_array: &[f64], freq: f64) -> (f64, f64) {
     (amplitude, phase)
 }
 
-fn r_ss(p: [f64; 6]) -> [f64; 3] {
-    let [hx, hy, hz, gamma_up, gamma_down, gamma_phi] = p;
+fn r_ss(liouvillian: Liouvillian) -> [f64; 3] {
+    let Liouvillian {
+        hamiltonian,
+        gamma_up,
+        gamma_down,
+        gamma_phi,
+    } = liouvillian;
+    let Vec3 {
+        x: hx,
+        y: hy,
+        z: hz,
+    } = hamiltonian.r;
     let gamma1 = gamma_up + gamma_down;
     let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
     let numerator = gamma_up - gamma_down;
@@ -315,8 +332,18 @@ fn r_ss(p: [f64; 6]) -> [f64; 3] {
     [scale * v0, scale * v1, scale * v2]
 }
 
-fn symmetric_polynomials(p: [f64; 6]) -> (f64, f64, f64) {
-    let [hx, hy, hz, gamma_up, gamma_down, gamma_phi] = p;
+fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
+    let Liouvillian {
+        hamiltonian,
+        gamma_up,
+        gamma_down,
+        gamma_phi,
+    } = liouvillian;
+    let Vec3 {
+        x: hx,
+        y: hy,
+        z: hz,
+    } = hamiltonian.r;
     let gamma1 = gamma_up + gamma_down;
     let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
     let h2 = hx * hx + hy * hy + hz * hz;
@@ -326,16 +353,25 @@ fn symmetric_polynomials(p: [f64; 6]) -> (f64, f64, f64) {
     (a1, a2, a3)
 }
 
-fn propagate(h_eff: [f64; 3], rates: [f64; 3], r0: [f64; 3], t: f64) -> [f64; 3] {
-    let p = [h_eff[0], h_eff[1], h_eff[2], rates[0], rates[1], rates[2]];
-    let rss = r_ss(p);
+fn propagate(liouvillian: Liouvillian, r0: [f64; 3], t: f64) -> [f64; 3] {
+    let rss = r_ss(liouvillian);
     let w = [r0[0] - rss[0], r0[1] - rss[1], r0[2] - rss[2]];
 
-    let [hx, hy, hz, gamma_up, gamma_down, gamma_phi] = p;
+    let Liouvillian {
+        hamiltonian,
+        gamma_up,
+        gamma_down,
+        gamma_phi,
+    } = liouvillian;
+    let Vec3 {
+        x: hx,
+        y: hy,
+        z: hz,
+    } = hamiltonian.r;
     let gamma1 = gamma_up + gamma_down;
     let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
 
-    let sym = symmetric_polynomials(p);
+    let sym = symmetric_polynomials(liouvillian);
     let eigs = cubic_roots(sym);
     let (c0, c1, c2) = cayley_coeffs(sym, eigs, t);
 

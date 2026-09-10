@@ -188,6 +188,15 @@ impl Hamiltonian {
     }
 }
 
+/// Hamiltonian and excitation, decay, and pure-dephasing rates for a two-level system.
+#[derive(Copy, Clone)]
+pub struct Liouvillian {
+    pub hamiltonian: Hamiltonian,
+    pub gamma_up: f64,
+    pub gamma_down: f64,
+    pub gamma_phi: f64,
+}
+
 pub fn commutator_norm(h1: Hamiltonian, h2: Hamiltonian) -> f64 {
     h1.r.cross(h2.r).norm()
 }
