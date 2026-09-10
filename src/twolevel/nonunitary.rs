@@ -39,31 +39,48 @@ impl Liouvillian {
     fn apply_linear(self, v: Vec3) -> Vec3 {
         self.decay.bloch_diagonal().circ(v) + self.hamiltonian.r.cross(v)
     }
+
+    fn steady_state(self) -> BlochVec {
+        let Liouvillian {
+            hamiltonian,
+            decay,
+        } = self;
+        let h = hamiltonian.r;
+        let gamma1 = decay.gamma1();
+        let gamma2 = decay.gamma2();
+        let numerator = decay.gamma_up - decay.gamma_down;
+        let denominator = gamma1 * (gamma2 * gamma2 + h.z * h.z) + gamma2 * (h.x * h.x + h.y * h.y);
+
+        let v0 = h.x * h.z + h.y * gamma2;
+        let v1 = h.y * h.z - h.x * gamma2;
+        let v2 = h.z * h.z + gamma2 * gamma2;
+
+        let scale = numerator / denominator;
+        BlochVec {
+            r: Vec3 {
+                x: scale * v0,
+                y: scale * v1,
+                z: scale * v2,
+            },
+        }
+    }
+
 }
 
-fn r_ss(liouvillian: Liouvillian) -> BlochVec {
-    let Liouvillian {
-        hamiltonian,
-        decay,
-    } = liouvillian;
-    let h = hamiltonian.r;
-    let gamma1 = decay.gamma1();
-    let gamma2 = decay.gamma2();
-    let numerator = decay.gamma_up - decay.gamma_down;
-    let denominator = gamma1 * (gamma2 * gamma2 + h.z * h.z) + gamma2 * (h.x * h.x + h.y * h.y);
+pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> BlochVec {
+    let steady_state = liouvillian.steady_state();
+    let w = r0.r - steady_state.r;
+    let m_w = liouvillian.apply_linear(w);
+    let m2_w = liouvillian.apply_linear(m_w);
+    let (c0, c1, c2) = get_cayley_coeffs(liouvillian, t);
+    let r = c0 * w + c1 * m_w + c2 * m2_w + steady_state.r;
+    BlochVec { r }
+}
 
-    let v0 = h.x * h.z + h.y * gamma2;
-    let v1 = h.y * h.z - h.x * gamma2;
-    let v2 = h.z * h.z + gamma2 * gamma2;
-
-    let scale = numerator / denominator;
-    BlochVec {
-        r: Vec3 {
-            x: scale * v0,
-            y: scale * v1,
-            z: scale * v2,
-        },
-    }
+fn get_cayley_coeffs(liouvillian: Liouvillian, t: f64) -> (f64, f64, f64) {
+    let sym = symmetric_polynomials(liouvillian);
+    let eigs = cubic_roots(sym);
+    cayley_coeffs(sym, eigs, t)
 }
 
 fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
@@ -80,22 +97,6 @@ fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
     let a2 = 2.0 * gamma1 * gamma2 + gamma2 * gamma2 + h2;
     let a3 = h.z * h.z * gamma1 + gamma2 * (h.x * h.x + h.y * h.y + gamma1 * gamma2);
     (a1, a2, a3)
-}
-
-pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> BlochVec {
-    let rss = r_ss(liouvillian).r;
-    let r0 = r0.r;
-    let w = r0 - rss;
-
-    let sym = symmetric_polynomials(liouvillian);
-    let eigs = cubic_roots(sym);
-    let (c0, c1, c2) = cayley_coeffs(sym, eigs, t);
-
-    let m_w = liouvillian.apply_linear(w);
-    let m2_w = liouvillian.apply_linear(m_w);
-
-    let r = c0 * w + c1 * m_w + c2 * m2_w + rss;
-    BlochVec { r }
 }
 
 fn cubic_roots((a1, a2, a3): (f64, f64, f64)) -> [Complex; 3] {
