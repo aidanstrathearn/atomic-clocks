@@ -105,12 +105,10 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
 
     let h_cross_w_circ = h.cross(w_circ);
 
-    let d_w_circ = d.circ(w_circ);
-
-    let d_w_cross = d.circ(w_cross);
+    let d_circ = d.circ(w_circ + w_cross);
 
 
-    let m2_w = d_w_circ + d_w_cross +  h_cross_w_circ + h_dot_w * h - h2 * w;
+    let m2_w = d_circ +  h_cross_w_circ + h_dot_w * h - h2 * w;
 
     let r = c0 * w + c1 * m_w + c2 * m2_w + rss;
     BlochVec { r }
