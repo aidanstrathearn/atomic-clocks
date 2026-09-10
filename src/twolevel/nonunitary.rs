@@ -34,6 +34,13 @@ pub struct Liouvillian {
     pub decay: Decay,
 }
 
+impl Liouvillian {
+    /// Applies the homogeneous Bloch generator, excluding the population source.
+    fn apply_linear(self, v: Vec3) -> Vec3 {
+        self.decay.bloch_diagonal().circ(v) + self.hamiltonian.r.cross(v)
+    }
+}
+
 fn r_ss(liouvillian: Liouvillian) -> BlochVec {
     let Liouvillian {
         hamiltonian,
@@ -80,39 +87,15 @@ pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> Bloch
     let r0 = r0.r;
     let w = r0 - rss;
 
-    let Liouvillian {
-        hamiltonian,
-        decay,
-    } = liouvillian;
-
     let sym = symmetric_polynomials(liouvillian);
     let eigs = cubic_roots(sym);
     let (c0, c1, c2) = cayley_coeffs(sym, eigs, t);
 
-    let d = decay.bloch_diagonal();
-
-    let h = hamiltonian.r;
-
-    let h2 = h.norm_square();
-
-    let w_circ = d.circ(w);
-
-    let w_cross = h.cross(w);
-
-    let m_w = w_circ + w_cross;
-
-    let h_dot_w = h.dot(w);
-
-    let h_cross_w_circ = h.cross(w_circ);
-
-    let d_circ = d.circ(w_circ + w_cross);
-
-
-    let m2_w = d_circ +  h_cross_w_circ + h_dot_w * h - h2 * w;
+    let m_w = liouvillian.apply_linear(w);
+    let m2_w = liouvillian.apply_linear(m_w);
 
     let r = c0 * w + c1 * m_w + c2 * m2_w + rss;
     BlochVec { r }
-
 }
 
 fn cubic_roots((a1, a2, a3): (f64, f64, f64)) -> [Complex; 3] {
