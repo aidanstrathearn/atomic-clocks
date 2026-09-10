@@ -45,19 +45,15 @@ fn r_ss(liouvillian: Liouvillian) -> BlochVec {
         gamma_down,
         gamma_phi,
     } = liouvillian;
-    let Vec3 {
-        x: hx,
-        y: hy,
-        z: hz,
-    } = hamiltonian.r;
+    let h = hamiltonian.r;
     let gamma1 = gamma_up + gamma_down;
     let gamma2 = 0.5 * (gamma_up + gamma_down) + gamma_phi;
     let numerator = gamma_up - gamma_down;
-    let denominator = gamma1 * (gamma2 * gamma2 + hz * hz) + gamma2 * (hx * hx + hy * hy);
+    let denominator = gamma1 * (gamma2 * gamma2 + h.z * h.z) + gamma2 * (h.x * h.x + h.y * h.y);
 
-    let v0 = hx * hz + hy * gamma2;
-    let v1 = hy * hz - hx * gamma2;
-    let v2 = hz * hz + gamma2 * gamma2;
+    let v0 = h.x * h.z + h.y * gamma2;
+    let v1 = h.y * h.z - h.x * gamma2;
+    let v2 = h.z * h.z + gamma2 * gamma2;
 
     let scale = numerator / denominator;
     BlochVec {
