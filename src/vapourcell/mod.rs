@@ -136,11 +136,6 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
         .skip(1)
         .map(|phase| phase + params.hamiltonian.kr)
         .collect();
-    let kr_harmonic = match params.hamiltonian.frame {
-        Frame::Probe => 1.0,
-        Frame::Atom => 0.0,
-        Frame::Pump => -1.0,
-    };
 
     let theta = PI / 2.0;
     let phi = PI / 2.0;
@@ -164,7 +159,6 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
                 last_start,
                 hz_offset,
                 kr_phase,
-                kr_harmonic,
                 rot,
                 &mut projected,
             );
@@ -222,7 +216,6 @@ fn accumulate_projected_trajectory(
     last_start: usize,
     hz_offset: f64,
     kr_phase: f64,
-    kr_harmonic: f64,
     rot: Vec3,
     projected: &mut [f64],
 ) {
@@ -237,7 +230,7 @@ fn accumulate_projected_trajectory(
         }
 
         let hamiltonian =
-            pump_probe_hamiltonian_sample(params, t_array[idx], hz_offset, kr_phase, kr_harmonic);
+            pump_probe_hamiltonian_sample(params, t_array[idx], hz_offset, kr_phase);
         let liouvillian = Liouvillian { hamiltonian, decay };
         let dt = t_array[idx + 1] - t_array[idx];
         state = propagate(liouvillian, state, dt);
@@ -249,26 +242,28 @@ fn pump_probe_hamiltonian_sample(
     t: f64,
     hz_offset: f64,
     kr_phase: f64,
-    kr_harmonic: f64,
 ) -> Hamiltonian {
     let phase = params.modulation.phase(t);
     let freq = params.modulation.freq(t);
     let kvt = t * params.kv;
 
     let (hz_base, pump_phase, probe_phase) = match params.frame {
-        Frame::Atom => (params.delta, kvt + phase, -kvt),
-        Frame::Pump => (params.delta - params.kv - freq, 0.0, -2.0 * kvt - phase),
-        Frame::Probe => (params.delta + params.kv, 2.0 * kvt + phase, 0.0),
+        Frame::Atom => (params.delta, kvt + phase + kr_phase, -kvt - kr_phase),
+        Frame::Pump => (
+            params.delta - params.kv - freq,
+            0.0,
+            -2.0 * kvt - phase - 2.0 * kr_phase,
+        ),
+        Frame::Probe => (
+            params.delta + params.kv,
+            2.0 * kvt + phase + 2.0 * kr_phase,
+            0.0,
+        ),
     };
 
-    let pump_kr = (kr_harmonic + 1.0) * kr_phase;
-    let probe_kr = (kr_harmonic - 1.0) * kr_phase;
-    let pu_phase = pump_phase + pump_kr;
-    let pr_phase = probe_phase + probe_kr;
-
     Hamiltonian::new(
-        params.r_pump * pu_phase.cos() + params.r_prbe * pr_phase.cos(),
-        params.r_pump * pu_phase.sin() + params.r_prbe * pr_phase.sin(),
+        params.r_pump * pump_phase.cos() + params.r_prbe * probe_phase.cos(),
+        params.r_pump * pump_phase.sin() + params.r_prbe * probe_phase.sin(),
         hz_base + hz_offset,
     )
 }
