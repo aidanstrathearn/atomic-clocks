@@ -111,7 +111,10 @@ pub struct DemodOutput {
     pub harmonic: Vec<Demodulation>,
 }
 
-pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
+/// Demodulates the expectation of `observable · sigma` in the selected frame.
+/// The observable is constant in that frame and is not normalized; its magnitude
+/// scales the measured signal.
+pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput, String> {
     validate_params(params)?;
 
     let t_array = time_grid(
@@ -137,14 +140,6 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
         .map(|phase| phase + params.hamiltonian.kr)
         .collect();
 
-    let theta = PI / 2.0;
-    let phi = PI / 2.0;
-    let rot = Vec3 {
-        x: theta.sin() * phi.cos(),
-        y: theta.sin() * phi.sin(),
-        z: theta.cos(),
-    };
-
     let mut dc = Vec::with_capacity(hz_array.len());
     let mut harmonic = Vec::with_capacity(hz_array.len());
 
@@ -159,7 +154,7 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
                 last_start,
                 hz_offset,
                 kr_phase,
-                rot,
+                observable,
                 &mut projected,
             );
         }
@@ -216,21 +211,20 @@ fn accumulate_projected_trajectory(
     last_start: usize,
     hz_offset: f64,
     kr_phase: f64,
-    rot: Vec3,
+    observable: Vec3,
     projected: &mut [f64],
 ) {
     let mut state = BlochVec::ground();
 
     for idx in 0..t_array.len() {
         if idx >= last_start {
-            projected[idx - last_start] += state.r.dot(rot);
+            projected[idx - last_start] += state.r.dot(observable);
         }
         if idx + 1 == t_array.len() {
             break;
         }
 
-        let hamiltonian =
-            pump_probe_hamiltonian_sample(params, t_array[idx], hz_offset, kr_phase);
+        let hamiltonian = pump_probe_hamiltonian_sample(params, t_array[idx], hz_offset, kr_phase);
         let liouvillian = Liouvillian { hamiltonian, decay };
         let dt = t_array[idx + 1] - t_array[idx];
         state = propagate(liouvillian, state, dt);
@@ -285,7 +279,7 @@ mod tests {
                 ..MtsParams::default()
             };
             assert_eq!(
-                compute_demod(&params).unwrap_err(),
+                compute_demod(&params, Vec3::from_angles(PI / 2.0, PI / 2.0)).unwrap_err(),
                 "mod_freq must be positive and finite"
             );
         }
@@ -301,7 +295,8 @@ mod tests {
                 },
                 ..MtsParams::default()
             };
-            let output = compute_demod(&params).expect("default scan succeeds");
+            let output = compute_demod(&params, Vec3::from_angles(PI / 2.0, PI / 2.0))
+                .expect("default scan succeeds");
             assert_eq!(output.hz.len(), params.solver.hz_num);
             assert!(output.hz.iter().all(|value| value.is_finite()));
             for values in [&output.dc, &output.harmonic] {
@@ -317,54 +312,68 @@ mod tests {
     }
 
     #[test]
-    fn raw_central_coefficients_match_a_damped_rabi_trajectory() {
+    fn raw_observable_coefficients_match_a_damped_rabi_trajectory() {
         // Isotropic unit-rate relaxation and a constant x drive give
-        // r_y(t) = drive * exp(-t) * sin(t) for drive = +/-1.
+        // r_y(t) = drive * exp(-t) * sin(t), r_z(t) = -exp(-t)*cos(t).
         for (drive, periods) in [(-1.0, 1), (1.0, 1), (1.0, 2)] {
-            let params = MtsParams {
-                hamiltonian: HamiltonianParams {
-                    r_pump: 0.0,
-                    r_prbe: drive,
-                    modulation: ModulationParams {
-                        depth: 0.0,
-                        ..ModulationParams::default()
-                    },
-                    ..HamiltonianParams::default()
+            for observable in [
+                Vec3::from_angles(PI / 2.0, PI / 2.0),
+                Vec3 {
+                    x: 0.5,
+                    y: -2.0,
+                    z: 3.0,
                 },
-                decay: Decay {
-                    gamma_up: 0.5,
-                    gamma_down: 0.5,
-                    gamma_phi: 0.5,
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
                 },
-                solver: MtsSolverParams {
-                    kr_n: 1,
-                    n_periods: periods,
-                    steps_per_period: 8,
-                    hz_num: 3,
-                    ..MtsSolverParams::default()
-                },
-            };
-            let output = compute_demod(&params).unwrap();
-            assert_eq!(output.hz[1], 0.0);
-            let mut expected = [0.0; 3];
-            for i in 0..=8 {
-                let t = (periods - 1) as f64 * 2.0 * PI + i as f64 * PI / 4.0;
-                let signal = drive * (-t).exp() * t.sin();
-                // Trapezoidal weight, including the lock-in factor 2 / duration.
-                let weight = if i == 0 || i == 8 { 0.125 } else { 0.25 };
-                expected[0] += weight * signal;
-                expected[1] += weight * signal * t.cos();
-                expected[2] += weight * signal * t.sin();
-            }
-            for (actual, expected) in [
-                (output.dc[1].in_phase, expected[0]),
-                (output.harmonic[1].in_phase, expected[1]),
-                (output.harmonic[1].quadrature, expected[2]),
             ] {
-                assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
-                assert!(actual * drive > 1e-5);
+                let params = MtsParams {
+                    hamiltonian: HamiltonianParams {
+                        r_pump: 0.0,
+                        r_prbe: drive,
+                        modulation: ModulationParams {
+                            depth: 0.0,
+                            ..ModulationParams::default()
+                        },
+                        ..HamiltonianParams::default()
+                    },
+                    decay: Decay {
+                        gamma_up: 0.5,
+                        gamma_down: 0.5,
+                        gamma_phi: 0.5,
+                    },
+                    solver: MtsSolverParams {
+                        kr_n: 1,
+                        n_periods: periods,
+                        steps_per_period: 8,
+                        hz_num: 3,
+                        ..MtsSolverParams::default()
+                    },
+                };
+                let output = compute_demod(&params, observable).unwrap();
+                assert_eq!(output.hz[1], 0.0);
+                let mut expected = [0.0; 3];
+                for i in 0..=8 {
+                    let t = (periods - 1) as f64 * 2.0 * PI + i as f64 * PI / 4.0;
+                    let signal =
+                        (-t).exp() * (observable.y * drive * t.sin() - observable.z * t.cos());
+                    // Trapezoidal weight, including the lock-in factor 2 / duration.
+                    let weight = if i == 0 || i == 8 { 0.125 } else { 0.25 };
+                    expected[0] += weight * signal;
+                    expected[1] += weight * signal * t.cos();
+                    expected[2] += weight * signal * t.sin();
+                }
+                for (actual, expected) in [
+                    (output.dc[1].in_phase, expected[0]),
+                    (output.harmonic[1].in_phase, expected[1]),
+                    (output.harmonic[1].quadrature, expected[2]),
+                ] {
+                    assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+                }
+                assert_eq!(output.dc[1].quadrature, 0.0);
             }
-            assert_eq!(output.dc[1].quadrature, 0.0);
         }
     }
 
@@ -376,30 +385,33 @@ mod tests {
         let expected = [scale, 0.4 * scale, 0.8 * scale];
         let mut previous = [f64::INFINITY; 3];
         for steps in [16, 32, 64] {
-            let output = compute_demod(&MtsParams {
-                hamiltonian: HamiltonianParams {
-                    r_pump: 0.0,
-                    r_prbe: 1.0,
-                    modulation: ModulationParams {
-                        depth: 0.0,
-                        ..ModulationParams::default()
+            let output = compute_demod(
+                &MtsParams {
+                    hamiltonian: HamiltonianParams {
+                        r_pump: 0.0,
+                        r_prbe: 1.0,
+                        modulation: ModulationParams {
+                            depth: 0.0,
+                            ..ModulationParams::default()
+                        },
+                        ..HamiltonianParams::default()
                     },
-                    ..HamiltonianParams::default()
+                    decay: Decay {
+                        gamma_up: 0.5,
+                        gamma_down: 0.5,
+                        gamma_phi: 0.5,
+                    },
+                    solver: MtsSolverParams {
+                        kr_n: 1,
+                        n_periods: 1,
+                        steps_per_period: steps,
+                        hz_lim: 0.0,
+                        hz_num: 1,
+                        ..MtsSolverParams::default()
+                    },
                 },
-                decay: Decay {
-                    gamma_up: 0.5,
-                    gamma_down: 0.5,
-                    gamma_phi: 0.5,
-                },
-                solver: MtsSolverParams {
-                    kr_n: 1,
-                    n_periods: 1,
-                    steps_per_period: steps,
-                    hz_lim: 0.0,
-                    hz_num: 1,
-                    ..MtsSolverParams::default()
-                },
-            })
+                Vec3::from_angles(PI / 2.0, PI / 2.0),
+            )
             .unwrap();
             let actual = [
                 output.dc[0].in_phase,

@@ -43,7 +43,9 @@ even detuning counts and one or multiple spatial phase samples. Tests also check
 the live defaults, invalid-parameter errors, and the minimal one-interval grid.
 
 Production returns raw `dc` and `harmonic` cosine/sine coefficients. The comparison
-adapter reconstructs the reference's four display arrays (`amp0`, `proj0`, `amp1`,
+callers pass `Vec3::from_angles(pi/2, pi/2)` to match the reference's fixed
+measurement direction. The reference does not depend on the production observable
+API. The comparison adapter reconstructs the reference's four display arrays (`amp0`, `proj0`, `amp1`,
 `proj1`), including its imposed detuning sign and forced central zero. These arrays
 must be finite and agree within `1e-12 + 1e-10 * abs(reference)`. Detuning grids
 must match exactly. The comparison reports the maximum absolute signal error.

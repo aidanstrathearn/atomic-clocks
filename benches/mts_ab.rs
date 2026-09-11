@@ -1,4 +1,6 @@
-use std::{hint::black_box, time::Duration};
+use std::{f64::consts::FRAC_PI_2, hint::black_box, time::Duration};
+
+use atomic_clocks::twolevel::Vec3;
 
 use atomic_clocks::vapourcell as current;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
@@ -9,6 +11,7 @@ mod support;
 use support::{assert_outputs_close, current_params, mts_reference as reference, scan_cases};
 
 fn mts_ab(c: &mut Criterion) {
+    let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
     for case in scan_cases().into_iter().filter(|case| {
         matches!(
             case.name.as_str(),
@@ -22,7 +25,8 @@ fn mts_ab(c: &mut Criterion) {
         // timed calls include the complete scan's grid construction/allocations.
         let expected =
             reference::compute_demod(&reference_params).expect("reference scan succeeds");
-        let actual = current::compute_demod(&current_params).expect("current scan succeeds");
+        let actual =
+            current::compute_demod(&current_params, observable).expect("current scan succeeds");
         let error = assert_outputs_close(&case.name, &actual, &expected);
         eprintln!(
             "{}: A/B parity OK, max absolute error {error:.3e}",
@@ -45,7 +49,7 @@ fn mts_ab(c: &mut Criterion) {
         group.bench_function("current", |b| {
             b.iter(|| {
                 black_box(
-                    current::compute_demod(black_box(&current_params))
+                    current::compute_demod(black_box(&current_params), observable)
                         .expect("current scan succeeds"),
                 )
             });

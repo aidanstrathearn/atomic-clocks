@@ -8,6 +8,16 @@ pub struct Vec3 {
 }
 
 impl Vec3 {
+    /// Unit vector from spherical angles in radians: `theta` is measured from
+    /// +z, and `phi` runs from +x toward +y in the xy plane.
+    pub fn from_angles(theta: f64, phi: f64) -> Self {
+        Self {
+            x: theta.sin() * phi.cos(),
+            y: theta.sin() * phi.sin(),
+            z: theta.cos(),
+        }
+    }
+
     pub fn dot(self, other: Self) -> f64 {
         self.x * other.x + self.y * other.y + self.z * other.z
     }
