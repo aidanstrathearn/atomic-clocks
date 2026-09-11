@@ -38,6 +38,7 @@ impl ModulationParams {
 }
 
 /// Cosine and sine coefficients relative to the demodulation reference.
+#[derive(Clone, Copy, Debug)]
 pub struct Demodulation {
     /// Cosine coefficient.
     pub in_phase: f64,

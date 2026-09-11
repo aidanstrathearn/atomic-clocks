@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use crate::maths::demodulation::{ModulationParams, lockin};
+use crate::maths::demodulation::{Demodulation, ModulationParams, lockin};
 use crate::twolevel::{BlochVec, Decay, Hamiltonian, Liouvillian, Vec3, propagate};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -100,13 +100,13 @@ impl Default for MtsParams {
 
 #[derive(Clone, Debug)]
 pub struct DemodOutput {
+    /// Detuning offsets relative to the Hamiltonian's `delta`.
     pub hz: Vec<f64>,
-    pub amp0: Vec<f64>,
-    pub proj0: Vec<f64>,
-    pub amp1: Vec<f64>,
-    pub proj1: Vec<f64>,
-    pub time_samples: usize,
-    pub last_period_samples: usize,
+    /// Zero-frequency lock-in results: twice the signed mean in `in_phase`,
+    /// with zero `quadrature`.
+    pub dc: Vec<Demodulation>,
+    /// Signed cosine and sine coefficients at the modulation frequency.
+    pub harmonic: Vec<Demodulation>,
 }
 
 pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
@@ -139,10 +139,8 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
         z: theta.cos(),
     };
 
-    let mut amp0 = Vec::with_capacity(hz_array.len());
-    let mut proj0 = Vec::with_capacity(hz_array.len());
-    let mut amp1 = Vec::with_capacity(hz_array.len());
-    let mut proj1 = Vec::with_capacity(hz_array.len());
+    let mut dc = Vec::with_capacity(hz_array.len());
+    let mut harmonic = Vec::with_capacity(hz_array.len());
 
     for &hz_offset in &hz_array {
         let mut projected = vec![0.0; last_period_samples];
@@ -166,27 +164,18 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
             *value *= kr_scale;
         }
 
-        let dc = lockin(&projected, t_last, 0.0);
-        let out_amp0 = dc.amplitude() / 2.0;
-        amp0.push(out_amp0);
-        proj0.push(out_amp0);
-
-        let harmonic = lockin(&projected, t_last, params.hamiltonian.modulation.frequency);
-        let hz_sign = -np_sign(hz_offset);
-        let out_amp1 = harmonic.amplitude() * hz_sign;
-        let out_cos1 = harmonic.phase().cos() * hz_sign;
-        amp1.push(out_amp1);
-        proj1.push(out_amp1 * out_cos1);
+        dc.push(lockin(&projected, t_last, 0.0));
+        harmonic.push(lockin(
+            &projected,
+            t_last,
+            params.hamiltonian.modulation.frequency,
+        ));
     }
 
     Ok(DemodOutput {
         hz: hz_array,
-        amp0,
-        proj0,
-        amp1,
-        proj1,
-        time_samples,
-        last_period_samples,
+        dc,
+        harmonic,
     })
 }
 
@@ -236,16 +225,6 @@ fn last_period_start(t_array: &[f64], period: f64) -> usize {
         .iter()
         .position(|&value| value > threshold)
         .unwrap_or(t_array.len() - 1)
-}
-
-fn np_sign(value: f64) -> f64 {
-    if value > 0.0 {
-        1.0
-    } else if value < 0.0 {
-        -1.0
-    } else {
-        0.0
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -359,10 +338,81 @@ mod tests {
                 ..MtsParams::default()
             };
             let output = compute_demod(&params).expect("default scan succeeds");
-            for values in [&output.hz, &output.amp0, &output.amp1, &output.proj1] {
+            assert_eq!(output.hz.len(), params.solver.hz_num);
+            assert!(output.hz.iter().all(|value| value.is_finite()));
+            for values in [&output.dc, &output.harmonic] {
                 assert_eq!(values.len(), params.solver.hz_num);
-                assert!(values.iter().all(|value| value.is_finite()), "{frame:?}");
+                assert!(
+                    values
+                        .iter()
+                        .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite()),
+                    "{frame:?}"
+                );
             }
+        }
+    }
+
+    #[test]
+    fn raw_central_coefficients_match_a_damped_rabi_trajectory() {
+        // Isotropic unit-rate relaxation and a constant x drive give
+        // r_y(t) = drive * exp(-t) * sin(t) for drive = +/-1.
+        for drive in [-1.0, 1.0] {
+            let params = MtsParams {
+                hamiltonian: HamiltonianParams {
+                    r_pump: 0.0,
+                    r_prbe: drive,
+                    modulation: ModulationParams {
+                        depth: 0.0,
+                        ..ModulationParams::default()
+                    },
+                    ..HamiltonianParams::default()
+                },
+                decay: Decay {
+                    gamma_up: 0.5,
+                    gamma_down: 0.5,
+                    gamma_phi: 0.5,
+                },
+                solver: MtsSolverParams {
+                    kr_n: 1,
+                    n_periods: 1,
+                    steps_per_period: 9,
+                    hz_num: 3,
+                    ..MtsSolverParams::default()
+                },
+            };
+            let output = compute_demod(&params).unwrap();
+            assert_eq!(output.hz[1], 0.0);
+            let mut expected = [0.0; 3];
+            for i in 0..=8 {
+                let t = i as f64 * PI / 4.0;
+                let signal = drive * (-t).exp() * t.sin();
+                // Trapezoidal weight, including the lock-in factor 2 / duration.
+                let weight = if i == 0 || i == 8 { 0.125 } else { 0.25 };
+                expected[0] += weight * signal;
+                expected[1] += weight * signal * t.cos();
+                expected[2] += weight * signal * t.sin();
+            }
+            for (actual, expected) in [
+                (output.dc[1].in_phase, expected[0]),
+                (output.harmonic[1].in_phase, expected[1]),
+                (output.harmonic[1].quadrature, expected[2]),
+            ] {
+                assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+                assert!(actual * drive > 0.01);
+            }
+            assert_eq!(output.dc[1].quadrature, 0.0);
+        }
+    }
+
+    #[test]
+    fn time_grid_preserves_sample_counts_and_last_period_window() {
+        let period = 2.0 * PI;
+        for (periods, count, last_count) in [(1, 100, 100), (3, 300, 101)] {
+            let times = linspace(0.0, periods as f64 * period, count);
+            assert_eq!(times.len(), count);
+            assert_eq!(times[0], 0.0);
+            assert!((times[count - 1] - periods as f64 * period).abs() < 1e-12);
+            assert_eq!(times.len() - last_period_start(&times, period), last_count);
         }
     }
 
@@ -377,10 +427,24 @@ mod tests {
         }
         let output = compute_demod(&fixture.params).expect("compute_demod succeeds");
         assert_close("hz", &output.hz, fixture.array("hz"), 2e-8, 2e-10);
-        assert_close("amp0", &output.amp0, fixture.array("amp0"), 2e-8, 2e-10);
-        assert_close("proj0", &output.proj0, fixture.array("proj0"), 2e-8, 2e-10);
-        assert_close("amp1", &output.amp1, fixture.array("amp1"), 2e-8, 2e-10);
-        assert_close("proj1", &output.proj1, fixture.array("proj1"), 2e-8, 2e-10);
+        // Reconstruct only the historical display convention for fixture comparison.
+        let amp0: Vec<_> = output
+            .dc
+            .iter()
+            .map(|value| value.amplitude() / 2.0)
+            .collect();
+        let mut amp1 = Vec::new();
+        let mut proj1 = Vec::new();
+        for (&hz, value) in output.hz.iter().zip(&output.harmonic) {
+            let sign = if hz == 0.0 { 0.0 } else { -hz.signum() };
+            let amplitude = value.amplitude() * sign;
+            amp1.push(amplitude);
+            proj1.push(amplitude * (value.phase().cos() * sign));
+        }
+        assert_close("amp0", &amp0, fixture.array("amp0"), 2e-8, 2e-10);
+        assert_close("proj0", &amp0, fixture.array("proj0"), 2e-8, 2e-10);
+        assert_close("amp1", &amp1, fixture.array("amp1"), 2e-8, 2e-10);
+        assert_close("proj1", &proj1, fixture.array("proj1"), 2e-8, 2e-10);
     }
 
     impl Fixture {

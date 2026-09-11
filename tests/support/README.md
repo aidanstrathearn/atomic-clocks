@@ -37,9 +37,15 @@ the live defaults and invalid-parameter errors. The copied solver's original
 fixture tests run as part of this test target; the production fixture tests still
 run through the library's normal test target.
 
-All four signal arrays (`amp0`, `proj0`, `amp1`, `proj1`) must be finite and agree
-within `1e-12 + 1e-10 * abs(reference)`. Detuning grids and time-sample metadata
+Production returns raw `dc` and `harmonic` cosine/sine coefficients. The comparison
+adapter reconstructs the reference's four display arrays (`amp0`, `proj0`, `amp1`,
+`proj1`), including its imposed detuning sign and forced central zero. These arrays
+must be finite and agree within `1e-12 + 1e-10 * abs(reference)`. Detuning grids
 must match exactly. The comparison reports the maximum absolute signal error.
+Raw coefficients are also checked for finiteness. Signed DC and both harmonic
+quadratures at zero detuning are tested separately against an analytic damped
+Rabi trajectory, since the historical display arrays discard that information.
+Sample counts are no longer returned; an internal grid/window test covers them.
 An intentional behaviour change should be documented and tested explicitly,
 without altering the frozen reference to hide the difference.
 
@@ -54,7 +60,10 @@ optimized benchmark binary. The timed cases are all three default frames,
 `shifted_pump`, and `dense_probe`. They check parity before timing. Each timed
 call performs the full serial detuning scan, including grid construction,
 allocation, propagation, spatial averaging, demodulation, and output disposal.
-Input conversion and parity checks are outside the timed region. Throughput
+Input conversion, legacy display reconstruction, and parity checks are outside
+the timed region. The reference still constructs its display arrays during the
+timed call; production returns raw coefficients without display processing.
+Throughput
 counts individual propagation steps over all detunings and spatial phases.
 
 For example, run only the default probe pair, or save a named baseline:
@@ -69,9 +78,8 @@ current/reference timings within each case; wall-clock speed is not a unit-test
 assertion. Small differences are possible even with identical source because of
 measurement noise and compilation/inlining across the library boundary.
 
-This first harness uses the public `compute_demod` API and does not change the
-production solver. Individual-step and trajectory comparisons can be added when
-the propagator is extracted; Rayon velocity comparisons can be added separately
+This harness uses the public `compute_demod` API. Individual-step and trajectory
+comparisons can be added separately; Rayon velocity comparisons can be added
 with a fixed worker count. Agreement with the original preserves behaviour but
 does not establish physical correctness where the original is singular, such as
 the zero-relaxation limit.

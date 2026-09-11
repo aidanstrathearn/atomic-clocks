@@ -138,7 +138,7 @@ pub fn scan_cases() -> Vec<Case> {
         .collect()
 }
 
-/// Check grid/metadata exactly and every signal with a mixed absolute/relative
+/// Check the grid exactly and legacy display signals with a mixed absolute/relative
 /// tolerance. Return the maximum absolute signal error for test/benchmark logs.
 pub fn assert_outputs_close(
     case: &str,
@@ -150,21 +150,40 @@ pub fn assert_outputs_close(
         "{case}: non-finite grid"
     );
     assert_eq!(actual.hz, expected.hz, "{case}: detuning grid changed");
-    assert_eq!(
-        actual.time_samples, expected.time_samples,
-        "{case}: time samples changed"
-    );
-    assert_eq!(
-        actual.last_period_samples, expected.last_period_samples,
-        "{case}: final-period samples changed"
-    );
+    for values in [&actual.dc, &actual.harmonic] {
+        assert_eq!(
+            values.len(),
+            actual.hz.len(),
+            "{case}: coefficient count changed"
+        );
+        assert!(
+            values
+                .iter()
+                .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite()),
+            "{case}: non-finite coefficient"
+        );
+    }
+    // The reference stores magnitudes and signed display projections, not raw I/Q.
+    let amp0: Vec<_> = actual
+        .dc
+        .iter()
+        .map(|value| value.amplitude() / 2.0)
+        .collect();
+    let mut amp1 = Vec::new();
+    let mut proj1 = Vec::new();
+    for (&hz, value) in actual.hz.iter().zip(&actual.harmonic) {
+        let sign = if hz == 0.0 { 0.0 } else { -hz.signum() };
+        let amplitude = value.amplitude() * sign;
+        amp1.push(amplitude);
+        proj1.push(amplitude * (value.phase().cos() * sign));
+    }
 
     let mut max_abs_error: f64 = 0.0;
     for (name, actual, expected) in [
-        ("amp0", &actual.amp0, &expected.amp0),
-        ("proj0", &actual.proj0, &expected.proj0),
-        ("amp1", &actual.amp1, &expected.amp1),
-        ("proj1", &actual.proj1, &expected.proj1),
+        ("amp0", &amp0, &expected.amp0),
+        ("proj0", &amp0, &expected.proj0),
+        ("amp1", &amp1, &expected.amp1),
+        ("proj1", &proj1, &expected.proj1),
     ] {
         assert_eq!(
             actual.len(),
