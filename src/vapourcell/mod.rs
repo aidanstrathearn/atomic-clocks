@@ -1,6 +1,7 @@
 use std::f64::consts::PI;
 
 use crate::maths::demodulation::{Demodulation, ModulationParams, lockin_period};
+use crate::maths::linspace;
 use crate::twolevel::{BlochVec, Decay, Hamiltonian, Liouvillian, Vec3, propagate};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -118,15 +119,23 @@ pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
         params.solver.steps_per_period,
         params.solver.n_periods,
     );
-    let hz_array = linspace(
-        -params.solver.hz_lim,
-        params.solver.hz_lim,
-        params.solver.hz_num,
-    );
+    let hz_array = if params.solver.hz_num == 1 {
+        vec![-params.solver.hz_lim]
+    } else {
+        linspace(
+            -params.solver.hz_lim,
+            params.solver.hz_lim,
+            params.solver.hz_num - 1,
+        )
+    };
     let last_start = (params.solver.n_periods - 1) * params.solver.steps_per_period;
     let last_period_samples = params.solver.steps_per_period + 1;
 
-    let kr_array = kr_array(params.solver.kr_n, params.hamiltonian.kr);
+    let kr_array: Vec<_> = linspace(0.0, 2.0 * PI, params.solver.kr_n)
+        .into_iter()
+        .skip(1)
+        .map(|phase| phase + params.hamiltonian.kr)
+        .collect();
     let kr_harmonic = match params.hamiltonian.frame {
         Frame::Probe => 1.0,
         Frame::Atom => 0.0,
@@ -196,20 +205,6 @@ fn validate_params(params: &MtsParams) -> Result<(), String> {
         return Err("hz_num must be positive".to_string());
     }
     Ok(())
-}
-
-fn linspace(start: f64, end: f64, count: usize) -> Vec<f64> {
-    if count == 1 {
-        return vec![start];
-    }
-    let step = (end - start) / (count - 1) as f64;
-    (0..count).map(|idx| start + step * idx as f64).collect()
-}
-
-fn kr_array(kr_n: usize, kr_offset: f64) -> Vec<f64> {
-    (1..=kr_n)
-        .map(|idx| 2.0 * PI * idx as f64 / kr_n as f64 + kr_offset)
-        .collect()
 }
 
 fn time_grid(period: f64, steps_per_period: usize, n_periods: usize) -> Vec<f64> {
