@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
 use atomic_clocks::maths::demodulation::{
-    demodulate_measurements, demodulate_measurements_fitted, lockin,
+    demodulate_measurements, demodulate_measurements_fitted, lockin_period,
 };
 
 fn assert_close(actual: f64, expected: f64) {
@@ -40,22 +40,44 @@ fn fitted_measurements_recover_coefficients_with_uneven_phases_and_dc() {
 }
 
 #[test]
-fn lockin_weights_nonuniform_trajectory_intervals() {
-    // For 2*cos(t) + 3*sin(t), trapezoidal sample weights are
-    // pi/4, 3*pi/4, 3*pi/4, pi/4 on this deliberately coarse grid.
-    let result = lockin(
-        &[2.0, 3.0, -3.0, 2.0],
-        &[0.0, PI / 2.0, 3.0 * PI / 2.0, 2.0 * PI],
-        1.0,
-    );
-    assert_close(result.in_phase, 1.0);
-    assert_close(result.quadrature, 4.5);
+fn lockin_resolves_integer_harmonics_and_dc() {
+    let traj: Vec<_> = (0..=64)
+        .map(|i| {
+            let phase = 2.0 * PI * i as f64 / 64.0;
+            5.0 + 2.0 * phase.cos() + 3.0 * phase.sin() - 4.0 * (3.0 * phase).cos()
+                + 0.7 * (3.0 * phase).sin()
+        })
+        .collect();
+    for (harmonic, cosine, sine) in [(0, 10.0, 0.0), (1, 2.0, 3.0), (2, 0.0, 0.0), (3, -4.0, 0.7)] {
+        let result = lockin_period(&traj, harmonic);
+        assert_close(result.in_phase, cosine);
+        assert_close(result.quadrature, sine);
+    }
+}
+
+#[test]
+fn lockin_half_weights_distinct_endpoint_values() {
+    // Both endpoints are phase zero, but their signal values need not match.
+    for harmonic in [0, 1] {
+        let result = lockin_period(&[1.0, 0.0, 0.0, 0.0, 3.0], harmonic);
+        assert_close(result.in_phase, 1.0);
+        assert_close(result.quadrature, 0.0);
+    }
 }
 
 #[test]
 fn lockin_retains_signed_dc_with_factor_two_normalization() {
-    let result = lockin(&[-3.0, -3.0, -3.0], &[0.0, 0.2, 1.0], 0.0);
-    assert_close(result.in_phase, -6.0);
-    assert_close(result.quadrature, 0.0);
-    assert_close(result.amplitude(), 6.0);
+    for traj in [&[-3.0, -3.0][..], &[-3.0, -3.0, -3.0][..]] {
+        let result = lockin_period(traj, 0);
+        assert_close(result.in_phase, -6.0);
+        assert_close(result.quadrature, 0.0);
+        assert_close(result.amplitude(), 6.0);
+    }
+}
+
+#[test]
+fn lockin_rejects_missing_interval() {
+    for traj in [&[][..], &[1.0][..]] {
+        assert!(std::panic::catch_unwind(|| lockin_period(traj, 1)).is_err());
+    }
 }

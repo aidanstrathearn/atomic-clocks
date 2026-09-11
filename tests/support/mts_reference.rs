@@ -85,11 +85,12 @@ pub struct DemodOutput {
 pub fn compute_demod(params: &MtsParams) -> Result<DemodOutput, String> {
     validate_params(params)?;
 
-    let period = 2.0 * PI / params.mod_freq.max(1e-6);
-    let time_samples = params.n_periods * params.steps_per_period;
-    let t_array = linspace(0.0, params.n_periods as f64 * period, time_samples);
+    let period = 2.0 * PI / params.mod_freq;
+    let time_samples = params.n_periods * params.steps_per_period + 1;
+    let dt = period / params.steps_per_period as f64;
+    let t_array: Vec<_> = (0..time_samples).map(|i| i as f64 * dt).collect();
     let hz_array = linspace(-params.hz_lim, params.hz_lim, params.hz_num);
-    let last_start = last_period_start(&t_array, period);
+    let last_start = (params.n_periods - 1) * params.steps_per_period;
     let t_last = &t_array[last_start..];
     let last_period_samples = t_last.len();
 
@@ -171,9 +172,6 @@ fn validate_params(params: &MtsParams) -> Result<(), String> {
     if params.steps_per_period == 0 {
         return Err("steps_per_period must be positive".to_string());
     }
-    if params.n_periods * params.steps_per_period < 2 {
-        return Err("time grid must contain at least two samples".to_string());
-    }
     if params.hz_num == 0 {
         return Err("hz_num must be positive".to_string());
     }
@@ -192,16 +190,6 @@ fn kr_array(kr_n: usize, kr_offset: f64) -> Vec<f64> {
     (1..=kr_n)
         .map(|idx| 2.0 * PI * idx as f64 / kr_n as f64 + kr_offset)
         .collect()
-}
-
-fn last_period_start(t_array: &[f64], period: f64) -> usize {
-    let last = t_array[t_array.len() - 1];
-    let dt = t_array[t_array.len() - 1] - t_array[t_array.len() - 2];
-    let threshold = last - period - dt;
-    t_array
-        .iter()
-        .position(|&value| value > threshold)
-        .unwrap_or(t_array.len() - 1)
 }
 
 fn np_sign(value: f64) -> f64 {
@@ -516,27 +504,10 @@ impl std::ops::Div for Complex {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::collections::HashMap;
-
-    #[derive(Debug)]
-    struct Fixture {
-        params: MtsParams,
-        arrays: HashMap<String, Vec<f64>>,
-    }
-
-    #[test]
-    fn baseline_fixture_matches_python() {
-        assert_legacy_python_fixture(include_str!("fixtures/baseline.fixture"));
-    }
-
-    #[test]
-    fn pump_shifted_fixture_matches_python_with_detuning_adjustment() {
-        assert_legacy_python_fixture(include_str!("fixtures/pump_shifted.fixture"));
-    }
-
     #[test]
     fn rejects_invalid_modulation_frequency() {
+        use super::*;
+
         for mod_freq in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let params = MtsParams {
                 mod_freq,
@@ -551,6 +522,8 @@ mod tests {
 
     #[test]
     fn default_scan_is_finite_in_every_frame() {
+        use super::*;
+
         for frame in [Frame::Pump, Frame::Atom, Frame::Probe] {
             let params = MtsParams {
                 frame,
@@ -562,126 +535,5 @@ mod tests {
                 assert!(values.iter().all(|value| value.is_finite()), "{frame:?}");
             }
         }
-    }
-
-    fn assert_legacy_python_fixture(text: &str) {
-        let mut fixture = parse_fixture(text);
-        if fixture.params.frame == Frame::Pump {
-            // Legacy Python used +mod_shift in pump-frame hz; the corrected
-            // frame transformation uses -mod_shift. Increasing delta by twice
-            // the shift reproduces the fixture Hamiltonian without changing
-            // the scan offsets or their demodulation sign convention.
-            fixture.params.delta += 2.0 * fixture.params.mod_shift;
-        }
-        let output = compute_demod(&fixture.params).expect("compute_demod succeeds");
-        assert_close("hz", &output.hz, fixture.array("hz"), 2e-8, 2e-10);
-        assert_close("amp0", &output.amp0, fixture.array("amp0"), 2e-8, 2e-10);
-        assert_close("proj0", &output.proj0, fixture.array("proj0"), 2e-8, 2e-10);
-        assert_close("amp1", &output.amp1, fixture.array("amp1"), 2e-8, 2e-10);
-        assert_close("proj1", &output.proj1, fixture.array("proj1"), 2e-8, 2e-10);
-    }
-
-    impl Fixture {
-        fn array(&self, name: &str) -> &[f64] {
-            self.arrays
-                .get(name)
-                .unwrap_or_else(|| panic!("missing fixture array '{name}'"))
-        }
-    }
-
-    fn parse_fixture(text: &str) -> Fixture {
-        let mut params = MtsParams::default();
-        let mut arrays = HashMap::new();
-
-        for raw_line in text.lines() {
-            let line = raw_line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            let parts: Vec<_> = line.split_whitespace().collect();
-            match parts.as_slice() {
-                ["case", _name] => {}
-                ["param", name, value] => set_param(&mut params, name, value),
-                ["array", name, len, values @ ..] => {
-                    let expected_len = len
-                        .parse::<usize>()
-                        .unwrap_or_else(|_| panic!("invalid array length '{len}'"));
-                    let parsed = values
-                        .iter()
-                        .map(|value| {
-                            value
-                                .parse::<f64>()
-                                .unwrap_or_else(|_| panic!("invalid float '{value}'"))
-                        })
-                        .collect::<Vec<_>>();
-                    assert_eq!(parsed.len(), expected_len, "array '{name}' length mismatch");
-                    arrays.insert((*name).to_string(), parsed);
-                }
-                _ => panic!("invalid fixture line: {line}"),
-            }
-        }
-
-        Fixture { params, arrays }
-    }
-
-    fn set_param(params: &mut MtsParams, name: &str, value: &str) {
-        match name {
-            "mod_freq" => params.mod_freq = parse_f64(value),
-            "mod_depth" => params.mod_depth = parse_f64(value),
-            "mod_shift" => params.mod_shift = parse_f64(value),
-            "delta" => params.delta = parse_f64(value),
-            "r_pump" => params.r_pump = parse_f64(value),
-            "r_prbe" => params.r_prbe = parse_f64(value),
-            "kv" => params.kv = parse_f64(value),
-            "kr" => params.kr = parse_f64(value),
-            "frame" => params.frame = Frame::parse(value).expect("valid frame"),
-            "kr_n" => params.kr_n = parse_usize(value),
-            "steps_per_period" => params.steps_per_period = parse_usize(value),
-            "n_periods" => params.n_periods = parse_usize(value),
-            "hz_lim" => params.hz_lim = parse_f64(value),
-            "hz_num" => params.hz_num = parse_usize(value),
-            "gamma_up" => params.gamma_up = parse_f64(value),
-            "gamma_down" => params.gamma_down = parse_f64(value),
-            "gamma_phi" => params.gamma_phi = parse_f64(value),
-            _ => panic!("unknown fixture param '{name}'"),
-        }
-    }
-
-    fn parse_f64(value: &str) -> f64 {
-        value
-            .parse::<f64>()
-            .unwrap_or_else(|_| panic!("invalid float param '{value}'"))
-    }
-
-    fn parse_usize(value: &str) -> usize {
-        value
-            .parse::<usize>()
-            .unwrap_or_else(|_| panic!("invalid usize param '{value}'"))
-    }
-
-    fn assert_close(name: &str, actual: &[f64], expected: &[f64], rtol: f64, atol: f64) {
-        assert_eq!(actual.len(), expected.len(), "{name} length mismatch");
-
-        let mut worst_abs = 0.0;
-        let mut worst_rel = 0.0;
-        let mut worst_idx = 0;
-        for (idx, (&a, &e)) in actual.iter().zip(expected.iter()).enumerate() {
-            let abs = (a - e).abs();
-            let rel = if e == 0.0 { abs } else { abs / e.abs() };
-            if abs > worst_abs {
-                worst_abs = abs;
-                worst_rel = rel;
-                worst_idx = idx;
-            }
-            assert!(
-                abs <= atol + rtol * e.abs(),
-                "{name}[{idx}] mismatch: actual={a:.17e}, expected={e:.17e}, abs={abs:.3e}, rel={rel:.3e}"
-            );
-        }
-
-        eprintln!(
-            "{name}: worst_abs={worst_abs:.3e}, worst_rel={worst_rel:.3e}, worst_idx={worst_idx}"
-        );
     }
 }

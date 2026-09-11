@@ -35,6 +35,8 @@ impl ModulationParams {
     pub fn freq(&self, t: f64) -> f64 {
         -self.depth * (self.frequency * t).sin() + self.shift
     }
+
+    pub fn period(&self) -> f64 {std::f64::consts::TAU / self.frequency}
 }
 
 /// Cosine and sine coefficients relative to the demodulation reference.
@@ -150,47 +152,30 @@ pub fn demodulate_measurements_fitted(
     }
 }
 
-/// Demodulates trajectory samples using trapezoidal integration over time.
-/// Times must be finite and strictly increasing, with at least two samples.
-/// Returns twice the time-averaged cosine and sine correlations; at zero
-/// frequency, `in_phase` is twice the signed time average and `quadrature` is zero.
-pub fn lockin(traj: &[f64], t_array: &[f64], freq: f64) -> Demodulation {
-    assert_eq!(
-        traj.len(),
-        t_array.len(),
-        "one value is required per sample time"
-    );
-    assert!(t_array.len() >= 2, "lock-in requires at least two samples");
-    assert!(
-        t_array.iter().all(|t| t.is_finite()),
-        "sample times must be finite"
-    );
-    assert!(
-        t_array.windows(2).all(|pair| pair[1] > pair[0]),
-        "sample times must be strictly increasing"
-    );
-    let t_total = t_array[t_array.len() - 1] - t_array[0];
-    let mut x_integral = 0.0;
-    let mut y_integral = 0.0;
-
-    for idx in 0..(traj.len() - 1) {
-        let t0 = t_array[idx];
-        let t1 = t_array[idx + 1];
-        let dt = t1 - t0;
-
-        let x0 = traj[idx] * (freq * t0).cos();
-        let x1 = traj[idx + 1] * (freq * t1).cos();
-        x_integral += 0.5 * (x0 + x1) * dt;
-
-        let y0 = traj[idx] * (freq * t0).sin();
-        let y1 = traj[idx + 1] * (freq * t1).sin();
-        y_integral += 0.5 * (y0 + y1) * dt;
+/// Demodulates uniform samples spanning exactly one period, including both endpoints.
+/// The first sample defines phase zero; the last is at phase `2*pi`.
+/// Endpoint values need not match. Trapezoidal endpoint weights are one half.
+/// `harmonic = 0` returns twice the signed mean in `in_phase` and zero quadrature;
+/// positive harmonics return the cosine and sine coefficients at that harmonic.
+/// The caller supplies the sampling convention; it cannot be checked from values alone.
+pub fn lockin_period(traj: &[f64], harmonic: usize) -> Demodulation {
+    assert!(traj.len() >= 2, "lock-in requires at least two samples");
+    let intervals = (traj.len() - 1) as f64;
+    let mut in_phase = 0.0;
+    let mut quadrature = 0.0;
+    for (i, &sample) in traj.iter().enumerate() {
+        let phase = std::f64::consts::TAU * harmonic as f64 * i as f64 / intervals;
+        let (sin, cos) = phase.sin_cos();
+        let weight = if i == 0 || i + 1 == traj.len() {
+            0.5
+        } else {
+            1.0
+        };
+        in_phase += weight * sample * cos;
+        quadrature += weight * sample * sin;
     }
-
-    let x_val = x_integral / t_total;
-    let y_val = y_integral / t_total;
     Demodulation {
-        in_phase: 2.0 * x_val,
-        quadrature: 2.0 * y_val,
+        in_phase: 2.0 * in_phase / intervals,
+        quadrature: 2.0 * quadrature / intervals,
     }
 }

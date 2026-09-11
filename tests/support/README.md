@@ -3,25 +3,32 @@
 `mts_reference.rs` was copied from `src/vapourcell/mod.rs` at commit
 `9153052937b574f82097d909153ea63c4d176b16`, before integrating MTS with `twolevel`.
 The original snapshot's SHA-256 was `89b5791e797defac7344c558879d5eb2f13efae2fd7014cb7c10d83f6f4648af`.
-The two Python fixtures in `fixtures/` were copied with it so its existing tests
-continue to work independently of the production fixture paths.
+The reference intentionally shares two corrected conventions with production:
 
-The reference has one intentional physics correction shared with production:
-`freq = phase'(t)` and pump-frame `hz = delta - kv - freq`. This changes the
-longitudinal `mod_shift` contribution from positive to negative. The Python
-fixtures retain the original convention; both fixture test helpers add
-`2 * mod_shift` to `delta` for Pump-frame fixtures to reproduce their original
-Hamiltonian. For `pump_shifted`, this means testing at `delta = 0.7` instead of
-`0.4`. Scan offsets, demodulation signs, expected arrays, and tolerances are
-unchanged. The normal A/B scans use identical, unadjusted physical parameters
-with the corrected convention in both implementations.
+- `freq = phase'(t)` and pump-frame `hz = delta - kv - freq`, correcting the
+  sign of the longitudinal `mod_shift` contribution.
+- Exactly `steps_per_period` intervals per period, with
+  `dt = (2*pi / mod_freq) / steps_per_period`, no frequency clamp, and
+  `n_periods * steps_per_period + 1` boundaries. The observation window is the
+  final `steps_per_period + 1` states, including both period endpoints. One
+  interval is now valid (though too coarse to resolve a harmonic).
 
-Apart from this documented correction and fixture adaptation, keep the reference
-and these fixture copies frozen. It includes its own types,
-defaults, numerical helpers, and demodulation conventions, including the imposed
-sign and exact-zero behaviour. Do not regenerate it from the working solver or
-make it call refactored library helpers. Update the adapter in `mod.rs` when the
-production API changes. Neither the snapshot nor the adapter is in the library.
+Production demodulates with `lockin_period(traj, harmonic)`. The reference keeps
+its independent time-based trapezoidal integrator and propagation implementation.
+A/B parity establishes agreement under the corrected conventions, not agreement
+with the original Python calculation.
+
+The Python fixtures in both `fixtures/` and `src/vapourcell/fixtures/` are retired
+historical data. They use the old grid/window and pump-shift convention. Their
+tests, parsers, and detuning-adjustment helpers have been removed; the data files
+remain unchanged. Analytic and convergence tests replace those comparisons.
+
+Apart from these documented corrections, keep the reference independent and the
+historical fixtures frozen. The reference includes its own types, defaults,
+numerical helpers, and display conventions, including the imposed sign and
+exact-zero behaviour. Do not regenerate it from the working solver or make it
+call refactored library helpers. Update the adapter in `mod.rs` when the production
+API changes. Neither the reference nor the adapter is in the library.
 
 ## Parity tests
 
@@ -33,9 +40,7 @@ The shared cases exercise all three frames with the original defaults, shifted
 modulation and positive velocity, negative velocity with excitation/dephasing,
 zero modulation depth over one period, and a dense grid. They include odd and
 even detuning counts and one or multiple spatial phase samples. Tests also check
-the live defaults and invalid-parameter errors. The copied solver's original
-fixture tests run as part of this test target; the production fixture tests still
-run through the library's normal test target.
+the live defaults, invalid-parameter errors, and the minimal one-interval grid.
 
 Production returns raw `dc` and `harmonic` cosine/sine coefficients. The comparison
 adapter reconstructs the reference's four display arrays (`amp0`, `proj0`, `amp1`,
@@ -45,9 +50,11 @@ must match exactly. The comparison reports the maximum absolute signal error.
 Raw coefficients are also checked for finiteness. Signed DC and both harmonic
 quadratures at zero detuning are tested separately against an analytic damped
 Rabi trajectory, since the historical display arrays discard that information.
-Sample counts are no longer returned; an internal grid/window test covers them.
-An intentional behaviour change should be documented and tested explicitly,
-without altering the frozen reference to hide the difference.
+An internal grid test verifies interval spacing, period boundaries, and final
+window size. Refining the grid is tested against continuous analytic damped-Rabi
+integrals. Harmonic extraction, endpoint weights, and DC normalization have
+separate tests in `tests/demodulation.rs`. Further intentional behaviour changes
+should be documented and tested explicitly.
 
 ## Paired speed benchmarks
 
@@ -63,8 +70,8 @@ allocation, propagation, spatial averaging, demodulation, and output disposal.
 Input conversion, legacy display reconstruction, and parity checks are outside
 the timed region. The reference still constructs its display arrays during the
 timed call; production returns raw coefficients without display processing.
-Throughput
-counts individual propagation steps over all detunings and spatial phases.
+Throughput counts `hz_num * kr_n * n_periods * steps_per_period` propagation
+steps, summed over detunings and spatial phases.
 
 For example, run only the default probe pair, or save a named baseline:
 
@@ -80,6 +87,6 @@ measurement noise and compilation/inlining across the library boundary.
 
 This harness uses the public `compute_demod` API. Individual-step and trajectory
 comparisons can be added separately; Rayon velocity comparisons can be added
-with a fixed worker count. Agreement with the original preserves behaviour but
-does not establish physical correctness where the original is singular, such as
-the zero-relaxation limit.
+with a fixed worker count. Agreement with the reference does not establish
+physical correctness where its propagator is singular, such as the
+zero-relaxation limit.

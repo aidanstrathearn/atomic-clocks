@@ -22,6 +22,22 @@ fn default_scan_matches_frozen_defaults() {
 }
 
 #[test]
+fn one_interval_is_a_valid_aligned_period() {
+    let params = reference::MtsParams {
+        n_periods: 1,
+        steps_per_period: 1,
+        kr_n: 1,
+        hz_num: 3,
+        ..reference::MtsParams::default()
+    };
+    let expected = reference::compute_demod(&params).unwrap();
+    assert_eq!(expected.time_samples, 2);
+    assert_eq!(expected.last_period_samples, 2);
+    let actual = current::compute_demod(&current_params(&params)).unwrap();
+    assert_outputs_close("one interval", &actual, &expected);
+}
+
+#[test]
 fn invalid_parameters_match_reference_errors() {
     let mut cases = Vec::new();
     for mod_freq in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
@@ -41,11 +57,6 @@ fn invalid_parameters_match_reference_errors() {
         },
         reference::MtsParams {
             steps_per_period: 0,
-            ..reference::MtsParams::default()
-        },
-        reference::MtsParams {
-            n_periods: 1,
-            steps_per_period: 1,
             ..reference::MtsParams::default()
         },
         reference::MtsParams {

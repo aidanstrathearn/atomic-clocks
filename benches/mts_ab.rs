@@ -31,7 +31,7 @@ fn mts_ab(c: &mut Criterion) {
 
         let steps = reference_params.hz_num
             * reference_params.kr_n
-            * (reference_params.n_periods * reference_params.steps_per_period - 1);
+            * (reference_params.n_periods * reference_params.steps_per_period);
         let mut group = c.benchmark_group(format!("mts_ab/{}", case.name));
         group.throughput(Throughput::Elements(steps as u64));
         group.bench_function("reference", |b| {
