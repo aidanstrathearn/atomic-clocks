@@ -9,6 +9,19 @@ use super::{BlochVec, Vec3};
 pub trait Channel {
     fn apply_to(&self, state: BlochVec) -> BlochVec;
     fn to_affine(&self) -> AffineChannel;
+
+    /// Evolve `X = r.sigma / 2`, a traceless Hermitian operator. Unlike a
+    /// trace-one state, its vector receives no affine shift.
+    fn apply_traceless(&self, r: Vec3) -> Vec3 {
+        self.to_affine().linear().apply_to_vec(r)
+    }
+
+    /// Pull back the vector coefficient of `O = a I + o.sigma` for pairing
+    /// with traceless operators: `o -> M^T o`. The scalar coefficient of the
+    /// full adjoint observable can change, but does not enter this pairing.
+    fn pull_back_traceless_observable(&self, o: Vec3) -> Vec3 {
+        self.to_affine().linear().transpose().apply_to_vec(o)
+    }
 }
 
 /// A channel representation closed under composition.
@@ -27,6 +40,14 @@ impl<C: Channel + ?Sized> Channel for &C {
 
     fn to_affine(&self) -> AffineChannel {
         (**self).to_affine()
+    }
+
+    fn apply_traceless(&self, r: Vec3) -> Vec3 {
+        (**self).apply_traceless(r)
+    }
+
+    fn pull_back_traceless_observable(&self, o: Vec3) -> Vec3 {
+        (**self).pull_back_traceless_observable(o)
     }
 }
 

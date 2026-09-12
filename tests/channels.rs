@@ -2,8 +2,7 @@ use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::maths::Mat3;
 use atomic_clocks::twolevel::{
-    AffineChannel, BlochVec, Channel, ComposableChannel, Hamiltonian, Unitary, Vec3,
-    compose_channels, propagate_to_final,
+    AffineChannel, BlochVec, Channel, ComposableChannel, Hamiltonian, Process, Unitary, Vec3,
 };
 
 fn assert_state(actual: BlochVec, expected: BlochVec) {
@@ -150,9 +149,9 @@ fn affine_composition_matches_sequential_evolution_and_is_associative() {
         .for_duration(0.8)
         .to_affine();
     let c = amplitude_damping(0.6);
-    let total = compose_channels([a, b, c]);
+    let total = Process::new([a, b, c]).compose();
     for initial in states() {
-        let expected = propagate_to_final([a, b, c], initial);
+        let expected = Process::new([a, b, c]).propagate_to_final(initial);
         assert_state(total.apply_to(initial), expected);
         assert_state(c.compose(&b.compose(&a)).apply_to(initial), expected);
         assert_state(c.compose(&b).compose(&a).apply_to(initial), expected);
@@ -173,11 +172,11 @@ fn different_channel_representations_can_be_applied_or_composed_as_affine() {
     let rotate = Hamiltonian::new(1.0, 0.0, 0.0).for_duration(FRAC_PI_2);
     let decay = amplitude_damping(0.75);
     let channels: [&dyn Channel; 2] = [&rotate, &decay];
-    let total = compose_channels(channels.map(|channel| channel.to_affine()));
+    let total = Process::new(channels.map(|channel| channel.to_affine())).compose();
     for initial in states() {
         assert_state(
             total.apply_to(initial),
-            propagate_to_final(channels, initial),
+            Process::new(channels).propagate_to_final(initial),
         );
     }
 }
@@ -188,12 +187,12 @@ fn composing_many_unitaries_preserves_norm_and_matches_affine_composition() {
         (0..20_000)
             .map(|i| Hamiltonian::new(0.4, (i as f64 * 0.001).sin(), 1.1).for_duration(0.001))
     };
-    let unitary = compose_channels(channels());
-    let affine = compose_channels(channels().map(|channel| channel.to_affine()));
+    let unitary = Process::new(channels()).compose();
+    let affine = Process::new(channels().map(|channel| channel.to_affine())).compose();
     for initial in states() {
         let actual = unitary.apply_to(initial);
         assert!((actual.r.norm() - initial.r.norm()).abs() < 1e-12);
-        assert_state(actual, propagate_to_final(channels(), initial));
+        assert_state(actual, Process::new(channels()).propagate_to_final(initial));
         assert_state(actual, affine.apply_to(initial));
         assert_state(unitary.inverse().apply_to(actual), initial);
     }

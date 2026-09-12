@@ -3,8 +3,7 @@ use std::f64::consts::PI;
 use crate::maths::demodulation::{Demodulation, ModulationParams, lockin_period};
 use crate::maths::linspace;
 use crate::twolevel::{
-    BlochVec, Decay, Hamiltonian, Liouvillian, TimeDependentHamiltonian, Vec3, propagate,
-    propagate_to_final, steps,
+    BlochVec, Decay, Hamiltonian, Liouvillian, Process, TimeDependentHamiltonian, Vec3, steps,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -248,10 +247,11 @@ fn accumulate_projected_trajectory(
         }
         .for_duration(dt)
     };
-    let warmed = propagate_to_final(steps(&t_array[..=last_start], &step_at), BlochVec::ground());
+    let warmed = Process::new(steps(&t_array[..=last_start], &step_at))
+        .propagate_to_final(BlochVec::ground());
     // The observation window includes both its initial and final boundary.
-    let window =
-        std::iter::once(warmed).chain(propagate(steps(&t_array[last_start..], &step_at), warmed));
+    let window = std::iter::once(warmed)
+        .chain(Process::new(steps(&t_array[last_start..], &step_at)).propagate(warmed));
     for (sum, state) in projected.iter_mut().zip(window) {
         *sum += state.r.dot(observable);
     }

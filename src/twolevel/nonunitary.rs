@@ -89,12 +89,29 @@ pub struct DissipativeStep {
 impl Channel for DissipativeStep {
     fn apply_to(&self, state: BlochVec) -> BlochVec {
         let w = state.r - self.steady_state.r;
-        let m_w = self.liouvillian.apply_linear(w);
-        let m2_w = self.liouvillian.apply_linear(m_w);
-        let (c0, c1, c2) = self.coefficients;
         BlochVec {
-            r: c0 * w + c1 * m_w + c2 * m2_w + self.steady_state.r,
+            r: self.apply_traceless(w) + self.steady_state.r,
         }
+    }
+
+    fn apply_traceless(&self, r: Vec3) -> Vec3 {
+        let m_r = self.liouvillian.apply_linear(r);
+        let m2_r = self.liouvillian.apply_linear(m_r);
+        let (c0, c1, c2) = self.coefficients;
+        c0 * r + c1 * m_r + c2 * m2_r
+    }
+
+    fn pull_back_traceless_observable(&self, o: Vec3) -> Vec3 {
+        // Transposing the Bloch generator reverses its Hamiltonian cross
+        // product and preserves the diagonal decay terms.
+        let transpose = |v: Vec3| {
+            self.liouvillian.decay.bloch_diagonal().circ(v)
+                - self.liouvillian.hamiltonian.r.cross(v)
+        };
+        let m_o = transpose(o);
+        let m2_o = transpose(m_o);
+        let (c0, c1, c2) = self.coefficients;
+        c0 * o + c1 * m_o + c2 * m2_o
     }
 
     fn to_affine(&self) -> AffineChannel {

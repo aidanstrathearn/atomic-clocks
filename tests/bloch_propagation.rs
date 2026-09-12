@@ -2,8 +2,8 @@ use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::Linspace;
 use atomic_clocks::maths::vec3::Vec3;
 use atomic_clocks::twolevel::{
-    BlochVec, Channel, ComposableChannel, Hamiltonian, TimeDependentHamiltonian, TrotterConfig,
-    Unitary, compose_channels, linear_response, propagate, propagate_to_final, steps,
+    BlochVec, Channel, ComposableChannel, Hamiltonian, Process, TimeDependentHamiltonian,
+    TrotterConfig, Unitary, steps,
 };
 
 fn assert_close(actual: f64, expected: f64) {
@@ -31,11 +31,17 @@ fn propagation_covers_exactly_the_requested_intervals() {
         );
         let channels = || steps(&times.array, |t, dt| ConstantDrive.h(t).for_duration(dt));
         let initial = BlochVec::ground();
-        let trajectory: Vec<_> = propagate(channels(), initial).collect();
+        let trajectory: Vec<_> = Process::new(channels()).propagate(initial).collect();
         assert_eq!(trajectory.len(), nsteps);
         assert_eq!(channels().len(), nsteps);
         assert_eq!(
-            linear_response(channels(), initial, Hamiltonian::new(0.0, 0.0, 1.0)).len(),
+            Process::new(channels())
+                .linear_response(
+                    initial,
+                    BlochVec::ground().r * 0.5,
+                    Hamiltonian::new(0.0, 0.0, 1.0)
+                )
+                .len(),
             nsteps
         );
         for (state, &time) in trajectory.iter().zip(&times.array[1..]) {
@@ -178,7 +184,7 @@ fn composed_propagation_matches_sequential_for_full_and_reduced_grids() {
         for tolerance in [0.0, 1.0e-6] {
             let times = Linspace::new(-1.0, 3.0, nsteps);
             let channels = || steps(&times.array, |t, dt| ramsey.h(t).for_duration(dt));
-            let composed = compose_channels(channels());
+            let composed = Process::new(channels()).compose();
             let unitary = Unitary::from_system(
                 &ramsey,
                 TrotterConfig {
@@ -205,7 +211,7 @@ fn composed_propagation_matches_sequential_for_full_and_reduced_grids() {
                     },
                 },
             ] {
-                let expected = propagate_to_final(channels(), initial);
+                let expected = Process::new(channels()).propagate_to_final(initial);
                 let composed_state = composed.apply_to(initial);
                 assert_close(composed_state.r.x, expected.r.x);
                 assert_close(composed_state.r.y, expected.r.y);
@@ -270,6 +276,8 @@ fn linear_response_matches_finite_kicks_for_pure_and_mixed_states() {
 
 fn assert_linear_response_matches_finite_kicks(channels: &[Unitary]) {
     let perturbation = Hamiltonian::new(0.4, -0.7, 1.1);
+    let pairs = Process::new(channels.iter().copied()).insertion_pairs();
+    assert_eq!(pairs.len(), channels.len());
     let epsilon = 1.0e-5;
     for initial in [
         BlochVec::ground(),
@@ -288,8 +296,20 @@ fn assert_linear_response_matches_finite_kicks(channels: &[Unitary]) {
             },
         },
     ] {
-        let responses = linear_response(channels.iter().copied(), initial, perturbation);
+        let responses = Process::new(channels).linear_response(
+            initial,
+            BlochVec::ground().r * 0.5,
+            perturbation,
+        );
         for (kick_index, response) in responses.into_iter().enumerate() {
+            assert_close(
+                pairs[kick_index].linear_response(
+                    initial,
+                    BlochVec::ground().r * 0.5,
+                    perturbation,
+                ),
+                response,
+            );
             let probability = |strength| {
                 let mut state = initial;
                 for (i, channel) in channels.iter().enumerate() {
@@ -319,9 +339,29 @@ fn linear_response_handles_identity_and_empty_evolution() {
         },
     };
     let perturbation = Hamiltonian::new(0.0, 1.0, 0.0);
-    let response = linear_response([Unitary::identity()], initial, perturbation);
+    let response = Process::new([Unitary::identity()]).linear_response(
+        initial,
+        BlochVec::ground().r * 0.5,
+        perturbation,
+    );
     assert_eq!(response.len(), 1);
     assert_close(response[0], 0.5);
 
-    assert!(linear_response([], initial, perturbation).is_empty());
+    let pairs = Process::new([Unitary::identity()]).insertion_pairs();
+    assert_eq!(pairs.len(), 1);
+    assert_close(
+        pairs[0].linear_response(initial, BlochVec::ground().r * 0.5, perturbation),
+        0.5,
+    );
+    assert!(
+        Process::new([] as [Unitary; 0])
+            .insertion_pairs()
+            .is_empty()
+    );
+
+    assert!(
+        Process::new([] as [Unitary; 0])
+            .linear_response(initial, BlochVec::ground().r * 0.5, perturbation)
+            .is_empty()
+    );
 }

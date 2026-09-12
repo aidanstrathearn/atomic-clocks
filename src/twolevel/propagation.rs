@@ -1,16 +1,36 @@
-//! Sample interval channels, then apply them to a state or compose them.
+//! Contract a sequence of channels with states, with each other, or around
+//! Hamiltonian insertions. A process represents a Markovian channel chain.
 //!
 //! ```
-//! use atomic_clocks::twolevel::{BlochVec, Hamiltonian, propagate, steps};
+//! use atomic_clocks::twolevel::{BlochVec, Hamiltonian, Process, steps};
 //!
 //! let times = [0.0, 0.1, 0.3];
 //! let drive = Hamiltonian::new(1.0, 0.0, 0.0);
 //! let channels = steps(&times, |_t, dt| drive.for_duration(dt));
-//! let trajectory: Vec<_> = propagate(channels, BlochVec::ground()).collect();
+//! let trajectory: Vec<_> = Process::new(channels).propagate(BlochVec::ground()).collect();
 //! assert_eq!(trajectory.len(), times.len() - 1);
 //! ```
+//!
+//! Supply endpoints directly for one response calculation, or prepare channel
+//! pairs to reuse across different initial states, observables, and kicks:
+//!
+//! ```
+//! use atomic_clocks::twolevel::{BlochVec, Hamiltonian, Process, Vec3, steps};
+//!
+//! let times = [0.0, 0.1, 0.3];
+//! let drive = Hamiltonian::new(1.0, 0.0, 0.0);
+//! let channels: Vec<_> = steps(&times, |_t, dt| drive.for_duration(dt)).collect();
+//! let initial = BlochVec::ground();
+//! let observable = Vec3 { x: 0.0, y: 0.0, z: -0.5 }; // ground projector
+//! let kick = Hamiltonian::new(0.0, 0.0, 1.0);
+//! let direct = Process::new(&channels).linear_response(initial, observable, kick);
+//! let pairs = Process::new(channels.iter().copied()).insertion_pairs();
+//! for (pair, expected) in pairs.iter().zip(direct) {
+//!     assert!((pair.linear_response(initial, observable, kick) - expected).abs() < 1e-12);
+//! }
+//! ```
 
-use super::{BlochVec, Channel, ComposableChannel, Hamiltonian, Unitary};
+use super::{BlochVec, Channel, ComposableChannel, Hamiltonian, Vec3};
 
 /// Lazily construct one channel per interval using its absolute left endpoint
 /// and duration. The final boundary is never sampled.
@@ -40,60 +60,150 @@ pub fn steps<C: Channel>(
         .map(move |pair| step_at(pair[0], pair[1] - pair[0]))
 }
 
-/// Lazily yield the state after each channel, excluding `initial`.
-/// With channels from [`steps`], states correspond to `times[1..]`.
-/// Collect this iterator to record a trajectory, or map it to observables.
-pub fn propagate<C: Channel>(
-    channels: impl IntoIterator<Item = C>,
-    initial: BlochVec,
-) -> impl Iterator<Item = BlochVec> {
-    channels.into_iter().scan(initial, |state, channel| {
-        *state = channel.apply_to(*state);
-        Some(*state)
-    })
+/// A chronological sequence of channels, independent of the state and
+/// measurements with which it will be contracted.
+///
+/// The source can be a collection, a borrowed collection, or a lazy iterator.
+/// Contractions consume the process. To reuse prepared channels, construct a
+/// process borrowing them with `Process::new(&channels)`; composition and
+/// insertion pairs require owned composable items, such as `channels.iter().copied()`.
+pub struct Process<S> {
+    channels: S,
 }
 
-/// Apply all channels without recording a trajectory. Empty evolution returns
-/// `initial`. Each channel is applied directly; no composed map is constructed.
-pub fn propagate_to_final<C: Channel>(
-    channels: impl IntoIterator<Item = C>,
-    initial: BlochVec,
-) -> BlochVec {
-    propagate(channels, initial).last().unwrap_or(initial)
-}
-
-/// Compose channels in iteration order, returning identity for an empty input.
-/// Convert to affine channels first to compose different representations.
-pub fn compose_channels<C: ComposableChannel>(channels: impl IntoIterator<Item = C>) -> C {
-    channels
-        .into_iter()
-        .fold(C::identity(), |total, channel| channel.compose(&total))
-}
-
-/// Ground-state probability response to a Hamiltonian kick after each unitary
-/// step. `perturbation` is the kick generator, and results are derivatives with
-/// respect to its duration at zero. Records the forward history for the backward
-/// measurement pass; empty evolution returns an empty vector.
-pub fn linear_response(
-    channels: impl IntoIterator<Item = Unitary>,
-    initial: BlochVec,
-    perturbation: Hamiltonian,
-) -> Vec<f64> {
-    let mut forward = initial;
-    let trajectory: Vec<_> = channels
-        .into_iter()
-        .map(|step| {
-            forward = step.apply_to(forward);
-            (step, forward)
-        })
-        .collect();
-
-    let mut responses = vec![0.0; trajectory.len()];
-    // A pure state's Bloch vector also specifies its measurement projector.
-    let mut measurement = BlochVec::ground();
-    for ((step, forward_state), response) in trajectory.into_iter().zip(&mut responses).rev() {
-        *response = 0.5 * measurement.r.dot(perturbation.r.cross(forward_state.r));
-        measurement = step.inverse().apply_to(measurement);
+impl<S> Process<S> {
+    /// Wrap a channel source without sampling or collecting it.
+    pub fn new(channels: S) -> Self {
+        Self { channels }
     }
-    responses
+}
+
+impl<S: IntoIterator> Process<S>
+where
+    S::Item: Channel,
+{
+    /// Lazily yield the state after each channel, excluding `initial`.
+    /// With channels from [`steps`], states correspond to `times[1..]`.
+    /// Collect this iterator to record a trajectory, or map it to observables.
+    pub fn propagate(self, initial: BlochVec) -> impl Iterator<Item = BlochVec> {
+        self.channels.into_iter().scan(initial, |state, channel| {
+            *state = channel.apply_to(*state);
+            Some(*state)
+        })
+    }
+
+    /// Apply all channels directly without constructing a composed map or
+    /// recording a trajectory. Empty evolution returns `initial`.
+    pub fn propagate_to_final(self, initial: BlochVec) -> BlochVec {
+        self.propagate(initial).last().unwrap_or(initial)
+    }
+
+    /// Final observable response to a Hamiltonian kick after each step.
+    ///
+    /// `observable` is `o` in `O = a I + o.sigma`; its scalar coefficient does
+    /// not contribute. For ground-state probability use `(0, 0, -0.5)`.
+    /// `perturbation` represents `V = v.sigma / 2`. Results are derivatives
+    /// with respect to the duration of a kick generated by `V` at zero.
+    ///
+    /// Contracts the initial state forward and the observable backward, using
+    /// O(N) work and storage without composing channels. With [`steps`], kicks
+    /// occur at `times[1..]`, including the final boundary. Empty evolution
+    /// returns an empty vector.
+    pub fn linear_response(
+        self,
+        initial: BlochVec,
+        observable: Vec3,
+        perturbation: Hamiltonian,
+    ) -> Vec<f64> {
+        let mut forward = initial;
+        let trajectory: Vec<_> = self
+            .channels
+            .into_iter()
+            .map(|step| {
+                forward = step.apply_to(forward);
+                (step, forward)
+            })
+            .collect();
+
+        let mut responses = vec![0.0; trajectory.len()];
+        let mut measurement = observable;
+        for ((step, forward_state), response) in trajectory.into_iter().zip(&mut responses).rev() {
+            *response = measurement.dot(perturbation.r.cross(forward_state.r));
+            measurement = step.pull_back_traceless_observable(measurement);
+        }
+        responses
+    }
+}
+
+impl<S: IntoIterator> Process<S>
+where
+    S::Item: ComposableChannel,
+{
+    /// Compose channels in iteration order, returning identity for an empty
+    /// input. Convert steps to affine channels before constructing the process
+    /// to compose representations that are not themselves closed under composition.
+    pub fn compose(self) -> S::Item {
+        self.channels
+            .into_iter()
+            .fold(S::Item::identity(), |total, channel| {
+                channel.compose(&total)
+            })
+    }
+
+    /// Contract the channels before and after each insertion, independently of
+    /// any initial state, observable, or perturbation. Uses O(N) compositions
+    /// and storage, without inverses or a requirement that channels be cloneable.
+    ///
+    /// Pair `i` places the kick after step `i`: `before` includes that step,
+    /// while `after` excludes it. The last pair has identity for `after`.
+    /// With [`steps`], pairs correspond to `times[1..]`. Empty evolution
+    /// returns an empty vector. Convert steps to affine channels first when
+    /// their representation is not closed under composition.
+    pub fn insertion_pairs(self) -> Vec<ChannelPair<S::Item>> {
+        let mut before = S::Item::identity();
+        let mut prepared: Vec<_> = self
+            .channels
+            .into_iter()
+            .map(|step| {
+                let next = step.compose(&before);
+                let prefix = std::mem::replace(&mut before, next);
+                (step, prefix)
+            })
+            .collect();
+
+        let mut after = S::Item::identity();
+        let mut pairs = Vec::with_capacity(prepared.len());
+        // `before` is the complete prefix. Each saved prefix becomes the
+        // `before` for the next iteration of this backward pass.
+        while let Some((step, prefix)) = prepared.pop() {
+            let earlier_after = after.compose(&step);
+            pairs.push(ChannelPair { before, after });
+            before = prefix;
+            after = earlier_after;
+        }
+        pairs.reverse();
+        pairs
+    }
+}
+
+/// Evolution on either side of one open Hamiltonian insertion.
+#[derive(Clone, Copy)]
+pub struct ChannelPair<C> {
+    pub before: C,
+    pub after: C,
+}
+
+impl<C: Channel> ChannelPair<C> {
+    /// Contract a prepared insertion with endpoints and a Hamiltonian kick.
+    /// Observable and kick conventions match [`Process::linear_response`].
+    pub fn linear_response(
+        &self,
+        initial: BlochVec,
+        observable: Vec3,
+        perturbation: Hamiltonian,
+    ) -> f64 {
+        let state = self.before.apply_to(initial);
+        let variation = perturbation.r.cross(state.r);
+        observable.dot(self.after.apply_traceless(variation))
+    }
 }

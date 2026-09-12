@@ -7,4 +7,4 @@ pub use crate::maths::vec3::Vec3;
 pub use channel::{AffineChannel, Channel, ComposableChannel};
 pub use nonunitary::{Decay, DissipativeStep, Liouvillian};
 pub use operator::{BlochVec, Hamiltonian, TimeDependentHamiltonian, TrotterConfig, Unitary};
-pub use propagation::{compose_channels, linear_response, propagate, propagate_to_final, steps};
+pub use propagation::{ChannelPair, Process, steps};

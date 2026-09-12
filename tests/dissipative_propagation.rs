@@ -1,6 +1,5 @@
 use atomic_clocks::twolevel::{
-    BlochVec, Channel, Decay, DissipativeStep, Hamiltonian, Liouvillian, Vec3, compose_channels,
-    propagate, propagate_to_final, steps,
+    BlochVec, Channel, Decay, DissipativeStep, Hamiltonian, Liouvillian, Process, Vec3, steps,
 };
 
 fn state(x: f64, y: f64, z: f64) -> BlochVec {
@@ -97,10 +96,10 @@ fn driven_steps_match_affine_conversion_and_constant_generator_composition() {
     };
     let times = [2.0, 2.1, 2.35, 2.9];
     let channels: Vec<_> = steps(&times, |_, dt| liouvillian.for_duration(dt)).collect();
-    let composed = compose_channels(channels.iter().map(Channel::to_affine));
+    let composed = Process::new(channels.iter().map(Channel::to_affine)).compose();
     let one_interval = liouvillian.for_duration(times[3] - times[0]);
     for initial in initial_states() {
-        let trajectory: Vec<_> = propagate(&channels, initial).collect();
+        let trajectory: Vec<_> = Process::new(&channels).propagate(initial).collect();
         assert_eq!(trajectory.len(), times.len() - 1);
         for (&time, actual) in times[1..].iter().zip(&trajectory) {
             assert_state(
@@ -110,7 +109,10 @@ fn driven_steps_match_affine_conversion_and_constant_generator_composition() {
         }
         let expected = one_interval.apply_to(initial);
         assert_state(*trajectory.last().unwrap(), expected);
-        assert_state(propagate_to_final(&channels, initial), expected);
+        assert_state(
+            Process::new(&channels).propagate_to_final(initial),
+            expected,
+        );
         assert_state(composed.apply_to(initial), expected);
         assert_state(one_interval.to_affine().apply_to(initial), expected);
     }
@@ -138,11 +140,11 @@ fn different_dissipative_steps_compose_with_unitary_channels() {
     .for_duration(0.7);
     let pulse = Hamiltonian::new(1.0, 0.0, 0.0).for_duration(0.4);
     let channels: [&dyn Channel; 3] = [&first, &pulse, &second];
-    let composed = compose_channels(channels.map(|channel| channel.to_affine()));
+    let composed = Process::new(channels.map(|channel| channel.to_affine())).compose();
     for initial in initial_states() {
         assert_state(
             composed.apply_to(initial),
-            propagate_to_final(channels, initial),
+            Process::new(channels).propagate_to_final(initial),
         );
     }
 }

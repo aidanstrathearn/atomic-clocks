@@ -1,8 +1,7 @@
 use std::f64::consts::PI;
 
 use atomic_clocks::twolevel::{
-    AffineChannel, BlochVec, Channel, ComposableChannel, Hamiltonian, Unitary, compose_channels,
-    propagate, propagate_to_final, steps,
+    AffineChannel, BlochVec, Channel, ComposableChannel, Hamiltonian, Process, Unitary, steps,
 };
 
 fn assert_state(state: BlochVec, expected: [f64; 3]) {
@@ -25,7 +24,9 @@ fn nonuniform_intervals_produce_the_expected_rotations() {
     let times = [2.0, 2.25, 3.0, 5.0];
     let mut generators = hamiltonians.into_iter();
     let channels = steps(&times, |_, dt| generators.next().unwrap().for_duration(dt));
-    let trajectory: Vec<_> = propagate(channels, BlochVec::ground()).collect();
+    let trajectory: Vec<_> = Process::new(channels)
+        .propagate(BlochVec::ground())
+        .collect();
     assert_eq!(trajectory.len(), 3);
     for (state, expected) in
         trajectory
@@ -44,17 +45,26 @@ fn empty_evolution_preserves_its_time_and_initial_state() {
         })
     };
     assert_eq!(channels().len(), 0);
-    assert_eq!(propagate(channels(), BlochVec::ground()).count(), 0);
+    assert_eq!(
+        Process::new(channels())
+            .propagate(BlochVec::ground())
+            .count(),
+        0
+    );
     assert_state(
-        propagate_to_final(channels(), BlochVec::ground()),
+        Process::new(channels()).propagate_to_final(BlochVec::ground()),
         [0.0, 0.0, -1.0],
     );
     assert_state(
-        compose_channels(channels()).apply_to(BlochVec::ground()),
+        Process::new(channels())
+            .compose()
+            .apply_to(BlochVec::ground()),
         [0.0, 0.0, -1.0],
     );
     assert_state(
-        compose_channels::<AffineChannel>([]).apply_to(BlochVec::ground()),
+        Process::new([] as [AffineChannel; 0])
+            .compose()
+            .apply_to(BlochVec::ground()),
         [0.0, 0.0, -1.0],
     );
 }
@@ -94,7 +104,7 @@ fn sampling_and_propagation_are_lazy_and_use_absolute_left_endpoints() {
         Hamiltonian::new(1.0, 0.0, 0.0).for_duration(dt)
     });
     assert!(sampled.borrow().is_empty());
-    let mut trajectory = propagate(channels, BlochVec::ground());
+    let mut trajectory = Process::new(channels).propagate(BlochVec::ground());
     assert!(sampled.borrow().is_empty());
     assert_state(
         trajectory.next().unwrap(),
@@ -114,12 +124,12 @@ fn warmup_and_recording_share_the_window_boundary() {
     let step_at = |t: f64, dt| Hamiltonian::new(t, 0.0, 0.0).for_duration(dt);
     let initial = BlochVec::ground();
     let full: Vec<_> = std::iter::once(initial)
-        .chain(propagate(steps(&times, step_at), initial))
+        .chain(Process::new(steps(&times, step_at)).propagate(initial))
         .collect();
     for start in 0..times.len() {
-        let warmed = propagate_to_final(steps(&times[..=start], step_at), initial);
+        let warmed = Process::new(steps(&times[..=start], step_at)).propagate_to_final(initial);
         let window: Vec<_> = std::iter::once(warmed)
-            .chain(propagate(steps(&times[start..], step_at), warmed))
+            .chain(Process::new(steps(&times[start..], step_at)).propagate(warmed))
             .collect();
         assert_eq!(window.len(), times.len() - start);
         for (actual, expected) in window.into_iter().zip(&full[start..]) {
@@ -144,11 +154,14 @@ fn propagation_accepts_borrowed_channels_without_composition() {
         Hamiltonian::new(1.0, 0.0, 0.0).for_duration(PI / 2.0),
     )];
     assert_state(
-        propagate_to_final(&channels, BlochVec::ground()),
+        Process::new(&channels).propagate_to_final(BlochVec::ground()),
         [0.0, 1.0, 0.0],
     );
     assert_state(
-        propagate(&channels, BlochVec::ground()).next().unwrap(),
+        Process::new(&channels)
+            .propagate(BlochVec::ground())
+            .next()
+            .unwrap(),
         [0.0, 1.0, 0.0],
     );
 }

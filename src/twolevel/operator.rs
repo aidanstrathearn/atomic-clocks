@@ -1,7 +1,7 @@
 use crate::maths::mat3::Mat3;
 use crate::maths::vec3::Vec3;
 
-use super::{AffineChannel, Channel, ComposableChannel, compose_channels};
+use super::{AffineChannel, Channel, ComposableChannel, Process};
 
 #[derive(Copy, Clone)]
 pub struct BlochVec {
@@ -87,10 +87,11 @@ impl Unitary {
 
     fn direct_compose(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
         let dt = config.dt();
-        compose_channels((0..config.nsteps).map(|i| {
+        Process::new((0..config.nsteps).map(|i| {
             let t = config.start + i as f64 * dt;
             system.h(t).for_duration(dt)
         }))
+        .compose()
     }
 
     fn reduced_compose(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
@@ -132,10 +133,18 @@ impl Unitary {
 
 impl Channel for Unitary {
     fn apply_to(&self, bloch: BlochVec) -> BlochVec {
-        let t = self.u.cross(bloch.r) * 2.0;
         BlochVec {
-            r: bloch.r + t * self.c + self.u.cross(t),
+            r: self.apply_traceless(bloch.r),
         }
+    }
+
+    fn apply_traceless(&self, r: Vec3) -> Vec3 {
+        let t = self.u.cross(r) * 2.0;
+        r + t * self.c + self.u.cross(t)
+    }
+
+    fn pull_back_traceless_observable(&self, o: Vec3) -> Vec3 {
+        self.inverse().apply_traceless(o)
     }
 
     fn to_affine(&self) -> AffineChannel {

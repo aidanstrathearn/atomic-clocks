@@ -3,8 +3,8 @@ use std::f64::consts::PI;
 use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::{Linspace, fourier_transform, linspace};
 use atomic_clocks::twolevel::{
-    BlochVec, Channel, Hamiltonian, TimeDependentHamiltonian, TrotterConfig, Unitary,
-    linear_response, steps,
+    BlochVec, Channel, Hamiltonian, Process, TimeDependentHamiltonian, TrotterConfig, Unitary,
+    Vec3, steps,
 };
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
@@ -103,11 +103,14 @@ fn temporal_response(params: &mut Params) -> (Linspace, Vec<f64>) {
     };
     // Hamiltonian stores h in h.sigma / 2, so h.z = 2 represents sigma_z.
     let perturbation = Hamiltonian::new(0.0, 0.0, 2.0);
-    let response = linear_response(
-        steps(&times.array, |t, dt| ramsey.h(t).for_duration(dt)),
-        initial,
-        perturbation,
-    );
+    // Ground projector: O = I / 2 - sigma_z / 2.
+    let observable = Vec3 {
+        x: 0.0,
+        y: 0.0,
+        z: -0.5,
+    };
+    let response = Process::new(steps(&times.array, |t, dt| ramsey.h(t).for_duration(dt)))
+        .linear_response(initial, observable, perturbation);
     // Each response is to a kick after its propagation step.
     let kick_times = Linspace {
         step: times.step,
