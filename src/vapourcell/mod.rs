@@ -3,7 +3,8 @@ use std::f64::consts::PI;
 use crate::maths::demodulation::{Demodulation, ModulationParams, lockin_period};
 use crate::maths::linspace;
 use crate::twolevel::{
-    BlochVec, Decay, Hamiltonian, Liouvillian, Vec3, propagate_nonunitary as propagate,
+    BlochVec, Decay, Hamiltonian, Liouvillian, TimeDependentHamiltonian, Vec3, propagate,
+    propagate_to_final, steps,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,6 +56,30 @@ impl Default for HamiltonianParams {
             kr: 0.0,
             frame: Frame::Probe,
         }
+    }
+}
+
+impl TimeDependentHamiltonian for HamiltonianParams {
+    fn h(&self, t: f64) -> Hamiltonian {
+        let phase = self.modulation.phase(t);
+        let freq = self.modulation.freq(t);
+        let kvt = t * self.kv;
+
+        let (hz, pump_phase, probe_phase) = match self.frame {
+            Frame::Atom => (self.delta, kvt + phase + self.kr, -kvt - self.kr),
+            Frame::Pump => (
+                self.delta - self.kv - freq,
+                0.0,
+                -2.0 * kvt - phase - 2.0 * self.kr,
+            ),
+            Frame::Probe => (self.delta + self.kv, 2.0 * kvt + phase + 2.0 * self.kr, 0.0),
+        };
+
+        Hamiltonian::new(
+            self.r_pump * pump_phase.cos() + self.r_prbe * probe_phase.cos(),
+            self.r_pump * pump_phase.sin() + self.r_prbe * probe_phase.sin(),
+            hz,
+        )
     }
 }
 
@@ -149,13 +174,16 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
         let mut projected = vec![0.0; last_period_samples];
 
         for &kr_phase in &kr_array {
+            let atom = HamiltonianParams {
+                delta: params.hamiltonian.delta + hz_offset,
+                kr: kr_phase,
+                ..params.hamiltonian
+            };
             accumulate_projected_trajectory(
-                &params.hamiltonian,
+                &atom,
                 params.decay,
                 &t_array,
                 last_start,
-                hz_offset,
-                kr_phase,
                 observable,
                 &mut projected,
             );
@@ -205,63 +233,28 @@ fn time_grid(period: f64, steps_per_period: usize, n_periods: usize) -> Vec<f64>
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn accumulate_projected_trajectory(
     params: &HamiltonianParams,
     decay: Decay,
     t_array: &[f64],
     last_start: usize,
-    hz_offset: f64,
-    kr_phase: f64,
     observable: Vec3,
     projected: &mut [f64],
 ) {
-    let mut state = BlochVec::ground();
-
-    for idx in 0..t_array.len() {
-        if idx >= last_start {
-            projected[idx - last_start] += state.r.dot(observable);
+    let step_at = |t, dt| {
+        Liouvillian {
+            hamiltonian: params.h(t),
+            decay,
         }
-        if idx + 1 == t_array.len() {
-            break;
-        }
-
-        let hamiltonian = pump_probe_hamiltonian_sample(params, t_array[idx], hz_offset, kr_phase);
-        let liouvillian = Liouvillian { hamiltonian, decay };
-        let dt = t_array[idx + 1] - t_array[idx];
-        state = propagate(liouvillian, state, dt);
-    }
-}
-
-fn pump_probe_hamiltonian_sample(
-    params: &HamiltonianParams,
-    t: f64,
-    hz_offset: f64,
-    kr_phase: f64,
-) -> Hamiltonian {
-    let phase = params.modulation.phase(t);
-    let freq = params.modulation.freq(t);
-    let kvt = t * params.kv;
-
-    let (hz_base, pump_phase, probe_phase) = match params.frame {
-        Frame::Atom => (params.delta, kvt + phase + kr_phase, -kvt - kr_phase),
-        Frame::Pump => (
-            params.delta - params.kv - freq,
-            0.0,
-            -2.0 * kvt - phase - 2.0 * kr_phase,
-        ),
-        Frame::Probe => (
-            params.delta + params.kv,
-            2.0 * kvt + phase + 2.0 * kr_phase,
-            0.0,
-        ),
+        .for_duration(dt)
     };
-
-    Hamiltonian::new(
-        params.r_pump * pump_phase.cos() + params.r_prbe * probe_phase.cos(),
-        params.r_pump * pump_phase.sin() + params.r_prbe * probe_phase.sin(),
-        hz_base + hz_offset,
-    )
+    let warmed = propagate_to_final(steps(&t_array[..=last_start], &step_at), BlochVec::ground());
+    // The observation window includes both its initial and final boundary.
+    let window =
+        std::iter::once(warmed).chain(propagate(steps(&t_array[last_start..], &step_at), warmed));
+    for (sum, state) in projected.iter_mut().zip(window) {
+        *sum += state.r.dot(observable);
+    }
 }
 
 #[cfg(test)]

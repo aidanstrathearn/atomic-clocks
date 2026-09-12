@@ -1,6 +1,7 @@
+use crate::maths::Mat3;
 use crate::maths::complex::Complex;
 
-use super::{BlochVec, Hamiltonian, Vec3};
+use super::{AffineChannel, BlochVec, Channel, Hamiltonian, Vec3};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Decay {
@@ -35,16 +36,25 @@ pub struct Liouvillian {
 }
 
 impl Liouvillian {
+    /// Prepare evolution under this constant generator for `dt`.
+    /// The duration and decay rates must be finite and nonnegative.
+    pub fn for_duration(&self, dt: f64) -> DissipativeStep {
+        // TODO: Handle singular steady states (including zero decay) and
+        // repeated/near-repeated eigenvalues; the current formula can fail there.
+        DissipativeStep {
+            liouvillian: *self,
+            steady_state: self.steady_state(),
+            coefficients: get_cayley_coeffs(*self, dt),
+        }
+    }
+
     /// Applies the homogeneous Bloch generator, excluding the population source.
     fn apply_linear(self, v: Vec3) -> Vec3 {
         self.decay.bloch_diagonal().circ(v) + self.hamiltonian.r.cross(v)
     }
 
     fn steady_state(self) -> BlochVec {
-        let Liouvillian {
-            hamiltonian,
-            decay,
-        } = self;
+        let Liouvillian { hamiltonian, decay } = self;
         let h = hamiltonian.r;
         let gamma1 = decay.gamma1();
         let gamma2 = decay.gamma2();
@@ -64,17 +74,38 @@ impl Liouvillian {
             },
         }
     }
-
 }
 
-pub(crate) fn propagate(liouvillian: Liouvillian, r0: BlochVec, t: f64) -> BlochVec {
-    let steady_state = liouvillian.steady_state();
-    let w = r0.r - steady_state.r;
-    let m_w = liouvillian.apply_linear(w);
-    let m2_w = liouvillian.apply_linear(m_w);
-    let (c0, c1, c2) = get_cayley_coeffs(liouvillian, t);
-    let r = c0 * w + c1 * m_w + c2 * m2_w + steady_state.r;
-    BlochVec { r }
+/// Prepared evolution over one interval of a constant [`Liouvillian`].
+/// Applies the analytical Bloch evolution without constructing a matrix.
+/// Convert with [`Channel::to_affine`] to compose it with other channels.
+#[derive(Copy, Clone)]
+pub struct DissipativeStep {
+    liouvillian: Liouvillian,
+    steady_state: BlochVec,
+    coefficients: (f64, f64, f64),
+}
+
+impl Channel for DissipativeStep {
+    fn apply_to(&self, state: BlochVec) -> BlochVec {
+        let w = state.r - self.steady_state.r;
+        let m_w = self.liouvillian.apply_linear(w);
+        let m2_w = self.liouvillian.apply_linear(m_w);
+        let (c0, c1, c2) = self.coefficients;
+        BlochVec {
+            r: c0 * w + c1 * m_w + c2 * m2_w + self.steady_state.r,
+        }
+    }
+
+    fn to_affine(&self) -> AffineChannel {
+        let h = self.liouvillian.hamiltonian.r;
+        let d = self.liouvillian.decay.bloch_diagonal();
+        let generator = Mat3::from_rows([[d.x, -h.z, h.y], [h.z, d.y, -h.x], [-h.y, h.x, d.z]]);
+        let (c0, c1, c2) = self.coefficients;
+        let linear = c0 * Mat3::identity() + c1 * generator + c2 * (generator * generator);
+        let shift = self.steady_state.r - linear.apply_to_vec(self.steady_state.r);
+        AffineChannel::new(linear, shift)
+    }
 }
 
 fn get_cayley_coeffs(liouvillian: Liouvillian, t: f64) -> (f64, f64, f64) {
@@ -84,10 +115,7 @@ fn get_cayley_coeffs(liouvillian: Liouvillian, t: f64) -> (f64, f64, f64) {
 }
 
 fn symmetric_polynomials(liouvillian: Liouvillian) -> (f64, f64, f64) {
-    let Liouvillian {
-        hamiltonian,
-        decay,
-    } = liouvillian;
+    let Liouvillian { hamiltonian, decay } = liouvillian;
 
     let gamma1 = decay.gamma1();
     let gamma2 = decay.gamma2();
