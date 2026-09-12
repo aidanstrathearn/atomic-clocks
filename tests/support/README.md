@@ -18,13 +18,12 @@ its independent time-based trapezoidal integrator and propagation implementation
 A/B parity establishes agreement under the corrected conventions, not agreement
 with the original Python calculation.
 
-The Python fixtures in both `fixtures/` and `src/vapourcell/fixtures/` are retired
-historical data. They use the old grid/window and pump-shift convention. Their
-tests, parsers, and detuning-adjustment helpers have been removed; the data files
-remain unchanged. Analytic and convergence tests replace those comparisons.
+The retired Python fixtures used the old grid/window and pump-shift convention
+and have been removed along with their tests, parsers, and detuning-adjustment
+helpers. Analytic and convergence tests replace those comparisons.
 
-Apart from these documented corrections, keep the reference independent and the
-historical fixtures frozen. The reference includes its own types, defaults,
+Apart from these documented corrections, keep the reference independent.
+The reference includes its own types, defaults,
 numerical helpers, and display conventions, including the imposed sign and
 exact-zero behaviour. Do not regenerate it from the working solver or make it
 call refactored library helpers. Update the adapter in `mod.rs` when the production
