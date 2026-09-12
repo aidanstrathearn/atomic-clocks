@@ -1,5 +1,7 @@
-use std::ops::Range;
+use crate::maths::mat3::Mat3;
 use crate::maths::vec3::Vec3;
+
+use super::{AffineChannel, Channel, ComposableChannel, compose_channels};
 
 #[derive(Copy, Clone)]
 pub struct BlochVec {
@@ -43,6 +45,10 @@ impl TrotterConfig {
             "time boundaries must be finite with stop >= start"
         );
         assert!(
+            (self.stop - self.start).is_finite(),
+            "evolution duration must be finite"
+        );
+        assert!(
             self.tolerance.is_finite() && self.tolerance >= 0.0,
             "reduction tolerance must be finite and nonnegative"
         );
@@ -60,30 +66,10 @@ pub struct Unitary {
     u: Vec3,
 }
 
-
 impl Unitary {
-    pub fn identity() -> Self {
-        Self {
-            c: 1.0,
-            u: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-        }
-    }
-
+    /// Equivalent to `hamiltonian.for_duration(dt)`.
     pub fn from_hamiltonian(hamiltonian: Hamiltonian, dt: f64) -> Self {
-        let v = hamiltonian.r * dt;
-        let angle = v.norm();
-        if angle == 0.0 {
-            return Self::identity();
-        }
-        let (sin_theta, cos_theta) = (0.5 * angle).sin_cos();
-        Self {
-            c: cos_theta,
-            u: v * (sin_theta / angle),
-        }
+        hamiltonian.for_duration(dt)
     }
 
     pub fn from_system(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
@@ -101,12 +87,10 @@ impl Unitary {
 
     fn direct_compose(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
         let dt = config.dt();
-        let mut total = Self::identity();
-        for i in 0..config.nsteps {
+        compose_channels((0..config.nsteps).map(|i| {
             let t = config.start + i as f64 * dt;
-            total = Self::from_hamiltonian(system.h(t), dt).compose(total);
-        }
-        total
+            system.h(t).for_duration(dt)
+        }))
     }
 
     fn reduced_compose(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
@@ -122,25 +106,17 @@ impl Unitary {
             if commutator_norm(pending, action) < threshold {
                 pending.r = pending.r + action.r;
             } else {
-                total = Self::from_hamiltonian(pending, 1.0).compose(total);
+                total = pending.for_duration(1.0).compose(&total);
                 pending = action;
             }
         }
-        Self::from_hamiltonian(pending, 1.0).compose(total)
+        pending.for_duration(1.0).compose(&total)
     }
 
     pub fn inverse(&self) -> Self {
         Self {
             c: self.c,
             u: self.u * -1.0,
-        }
-    }
-
-    /// Returns `self * earlier`: apply `earlier` first, then `self`.
-    pub fn compose(&self, earlier: Self) -> Self {
-        Self {
-            c: self.c * earlier.c - self.u.dot(earlier.u),
-            u: earlier.u * self.c + self.u * earlier.c + self.u.cross(earlier.u),
         }
     }
 
@@ -152,12 +128,68 @@ impl Unitary {
             u: self.u * scale,
         }
     }
+}
 
-    pub fn apply_to(&self, bloch: BlochVec) -> BlochVec {
+impl Channel for Unitary {
+    fn apply_to(&self, bloch: BlochVec) -> BlochVec {
         let t = self.u.cross(bloch.r) * 2.0;
         BlochVec {
             r: bloch.r + t * self.c + self.u.cross(t),
         }
+    }
+
+    fn to_affine(&self) -> AffineChannel {
+        let columns = [
+            Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        ]
+        .map(|r| {
+            let rotated = self.apply_to(BlochVec { r }).r;
+            [rotated.x, rotated.y, rotated.z]
+        });
+        AffineChannel::new(
+            Mat3::from_columns(columns),
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        )
+    }
+}
+
+impl ComposableChannel for Unitary {
+    fn identity() -> Self {
+        Self {
+            c: 1.0,
+            u: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
+    }
+
+    /// Apply `earlier` first, then `self`, removing quaternion norm drift.
+    fn compose(&self, earlier: &Self) -> Self {
+        Self {
+            c: self.c * earlier.c - self.u.dot(earlier.u),
+            u: earlier.u * self.c + self.u * earlier.c + self.u.cross(earlier.u),
+        }
+        .normalised()
     }
 }
 
@@ -185,6 +217,21 @@ impl Hamiltonian {
 
     pub fn norm(&self) -> f64 {
         self.r.norm()
+    }
+
+    /// Evolution under this constant Hamiltonian for `dt`.
+    /// Negative durations produce the inverse rotation.
+    pub fn for_duration(&self, dt: f64) -> Unitary {
+        let v = self.r * dt;
+        let angle = v.norm();
+        if angle == 0.0 {
+            return Unitary::identity();
+        }
+        let (sin_theta, cos_theta) = (0.5 * angle).sin_cos();
+        Unitary {
+            c: cos_theta,
+            u: v * (sin_theta / angle),
+        }
     }
 }
 

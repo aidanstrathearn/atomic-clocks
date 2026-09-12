@@ -2,7 +2,9 @@ use std::f64::consts::PI;
 
 use crate::maths::demodulation::{Demodulation, ModulationParams, lockin_period};
 use crate::maths::linspace;
-use crate::twolevel::{BlochVec, Decay, Hamiltonian, Liouvillian, Vec3, propagate};
+use crate::twolevel::{
+    BlochVec, Decay, Hamiltonian, Liouvillian, Vec3, propagate_nonunitary as propagate,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Frame {

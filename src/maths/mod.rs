@@ -1,6 +1,9 @@
 pub(crate) mod complex;
 pub mod demodulation;
+pub mod mat3;
 pub mod vec3;
+
+pub use mat3::Mat3;
 
 use std::f64::consts::PI;
 

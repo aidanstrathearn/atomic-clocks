@@ -2,7 +2,8 @@ use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::Linspace;
 use atomic_clocks::maths::vec3::Vec3;
 use atomic_clocks::twolevel::{
-    BlochVec, Hamiltonian, Solver, TimeDependentHamiltonian, TrotterConfig, Unitary,
+    BlochVec, Channel, ComposableChannel, Hamiltonian, TimeDependentHamiltonian, TrotterConfig,
+    Unitary, compose_channels, linear_response, propagate, propagate_to_final, steps,
 };
 
 fn assert_close(actual: f64, expected: f64) {
@@ -28,15 +29,13 @@ fn propagation_covers_exactly_the_requested_intervals() {
             times.array,
             atomic_clocks::maths::linspace(-1.0, 1.0, nsteps)
         );
-        let solver = Solver::from(&ConstantDrive, times.array.clone());
+        let channels = || steps(&times.array, |t, dt| ConstantDrive.h(t).for_duration(dt));
         let initial = BlochVec::ground();
-        let trajectory = solver.propagate(initial);
+        let trajectory: Vec<_> = propagate(channels(), initial).collect();
         assert_eq!(trajectory.len(), nsteps);
-        assert_eq!(solver.hamiltonians().len(), nsteps);
+        assert_eq!(channels().len(), nsteps);
         assert_eq!(
-            solver
-                .linear_response(initial, Hamiltonian::new(0.0, 0.0, 1.0))
-                .len(),
+            linear_response(channels(), initial, Hamiltonian::new(0.0, 0.0, 1.0)).len(),
             nsteps
         );
         for (state, &time) in trajectory.iter().zip(&times.array[1..]) {
@@ -160,7 +159,7 @@ fn unitary_preserves_length_and_inverse_restores_state() {
 fn composition_applies_the_earlier_rotation_first() {
     let x = Unitary::from_hamiltonian(Hamiltonian::new(1.0, 0.0, 0.0), std::f64::consts::FRAC_PI_2);
     let y = Unitary::from_hamiltonian(Hamiltonian::new(0.0, 1.0, 0.0), std::f64::consts::FRAC_PI_2);
-    let result = y.compose(x).apply_to(BlochVec::ground());
+    let result = y.compose(&x).apply_to(BlochVec::ground());
     assert_close(result.r.x, 0.0);
     assert_close(result.r.y, 1.0);
     assert_close(result.r.z, 0.0);
@@ -177,7 +176,9 @@ fn composed_propagation_matches_sequential_for_full_and_reduced_grids() {
     };
     for nsteps in [1, 2, 501, 10_000] {
         for tolerance in [0.0, 1.0e-6] {
-            let solver = Solver::from(&ramsey, Linspace::new(-1.0, 3.0, nsteps).array);
+            let times = Linspace::new(-1.0, 3.0, nsteps);
+            let channels = || steps(&times.array, |t, dt| ramsey.h(t).for_duration(dt));
+            let composed = compose_channels(channels());
             let unitary = Unitary::from_system(
                 &ramsey,
                 TrotterConfig {
@@ -204,7 +205,11 @@ fn composed_propagation_matches_sequential_for_full_and_reduced_grids() {
                     },
                 },
             ] {
-                let expected = *solver.propagate(initial).last().unwrap();
+                let expected = propagate_to_final(channels(), initial);
+                let composed_state = composed.apply_to(initial);
+                assert_close(composed_state.r.x, expected.r.x);
+                assert_close(composed_state.r.y, expected.r.y);
+                assert_close(composed_state.r.z, expected.r.z);
                 let actual = unitary.apply_to(initial);
                 for (actual, expected) in [
                     (actual.r.x, expected.r.x),
@@ -233,38 +238,37 @@ fn composed_propagation_matches_sequential_for_full_and_reduced_grids() {
     assert_close(actual.r.z, -1.0);
 }
 
-fn response_solver() -> Solver {
+fn response_channels() -> Vec<Unitary> {
     let times = Linspace::new(-1.0, 3.0, 80);
-    Solver::from(
-        &Ramsey {
-            pulse_area: 1.2,
-            detuning: 0.7,
-            pulse_width: 0.2,
-            pulse_separation: 2.0,
-            phase_diff: 0.8,
-        },
-        times.array,
-    )
+    let ramsey = Ramsey {
+        pulse_area: 1.2,
+        detuning: 0.7,
+        pulse_width: 0.2,
+        pulse_separation: 2.0,
+        phase_diff: 0.8,
+    };
+    steps(&times.array, |t, dt| ramsey.h(t).for_duration(dt)).collect()
 }
 
 #[test]
 fn linear_response_matches_finite_kicks_for_pure_and_mixed_states() {
-    let solver = response_solver();
-    let nonuniform = Solver::new(
-        vec![
-            Hamiltonian::new(0.4, -0.7, 1.1),
-            Hamiltonian::new(0.8, -1.4, 2.2),
-            Hamiltonian::new(-0.3, 0.6, 0.2),
-            Hamiltonian::new(0.2, 0.1, -0.5),
-        ],
-        vec![-1.0, -0.75, 0.0, 0.125, 3.0],
-    );
-    for solver in [&solver, &nonuniform] {
-        assert_linear_response_matches_finite_kicks(solver);
+    let channels = response_channels();
+    let hamiltonians = [
+        Hamiltonian::new(0.4, -0.7, 1.1),
+        Hamiltonian::new(0.8, -1.4, 2.2),
+        Hamiltonian::new(-0.3, 0.6, 0.2),
+        Hamiltonian::new(0.2, 0.1, -0.5),
+    ];
+    let times = [-1.0, -0.75, 0.0, 0.125, 3.0];
+    let mut generators = hamiltonians.into_iter();
+    let nonuniform: Vec<_> =
+        steps(&times, |_, dt| generators.next().unwrap().for_duration(dt)).collect();
+    for channels in [&channels, &nonuniform] {
+        assert_linear_response_matches_finite_kicks(channels);
     }
 }
 
-fn assert_linear_response_matches_finite_kicks(solver: &Solver) {
+fn assert_linear_response_matches_finite_kicks(channels: &[Unitary]) {
     let perturbation = Hamiltonian::new(0.4, -0.7, 1.1);
     let epsilon = 1.0e-5;
     for initial in [
@@ -284,13 +288,12 @@ fn assert_linear_response_matches_finite_kicks(solver: &Solver) {
             },
         },
     ] {
-        let responses = solver.linear_response(initial, perturbation);
+        let responses = linear_response(channels.iter().copied(), initial, perturbation);
         for (kick_index, response) in responses.into_iter().enumerate() {
             let probability = |strength| {
                 let mut state = initial;
-                for (i, &h) in solver.hamiltonians().iter().enumerate() {
-                    let dt = solver.times()[i + 1] - solver.times()[i];
-                    state = Unitary::from_hamiltonian(h, dt).apply_to(state);
+                for (i, channel) in channels.iter().enumerate() {
+                    state = channel.apply_to(state);
                     if i == kick_index {
                         state = Unitary::from_hamiltonian(perturbation, strength).apply_to(state);
                     }
@@ -308,7 +311,6 @@ fn assert_linear_response_matches_finite_kicks(solver: &Solver) {
 
 #[test]
 fn linear_response_handles_identity_and_empty_evolution() {
-    let solver = Solver::new(vec![Hamiltonian::new(0.0, 0.0, 0.0)], vec![-1.0, 3.0]);
     let initial = BlochVec {
         r: Vec3 {
             x: 1.0,
@@ -317,10 +319,9 @@ fn linear_response_handles_identity_and_empty_evolution() {
         },
     };
     let perturbation = Hamiltonian::new(0.0, 1.0, 0.0);
-    let response = solver.linear_response(initial, perturbation);
+    let response = linear_response([Unitary::identity()], initial, perturbation);
     assert_eq!(response.len(), 1);
     assert_close(response[0], 0.5);
 
-    let solver = Solver::new(vec![], vec![-1.0]);
-    assert!(solver.linear_response(initial, perturbation).is_empty());
+    assert!(linear_response([], initial, perturbation).is_empty());
 }

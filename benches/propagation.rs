@@ -1,7 +1,7 @@
 use std::{f64::consts::FRAC_PI_2, hint::black_box, time::Duration};
 
 use atomic_clocks::interferometer::ramsey::Ramsey;
-use atomic_clocks::twolevel::{BlochVec, TrotterConfig, Unitary};
+use atomic_clocks::twolevel::{BlochVec, Channel, TrotterConfig, Unitary};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 fn propagation(c: &mut Criterion) {

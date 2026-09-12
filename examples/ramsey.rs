@@ -2,7 +2,10 @@ use std::f64::consts::PI;
 
 use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::{Linspace, fourier_transform, linspace};
-use atomic_clocks::twolevel::{BlochVec, Hamiltonian, Solver, TrotterConfig, Unitary};
+use atomic_clocks::twolevel::{
+    BlochVec, Channel, Hamiltonian, TimeDependentHamiltonian, TrotterConfig, Unitary,
+    linear_response, steps,
+};
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
 const TIME_START: f64 = -1.0;
@@ -98,10 +101,13 @@ fn temporal_response(params: &mut Params) -> (Linspace, Vec<f64>) {
         pulse_separation: PULSE_SEPARATION,
         phase_diff: 0.0,
     };
-    let solver = Solver::from(&ramsey, times.array.clone());
     // Hamiltonian stores h in h.sigma / 2, so h.z = 2 represents sigma_z.
     let perturbation = Hamiltonian::new(0.0, 0.0, 2.0);
-    let response = solver.linear_response(initial, perturbation);
+    let response = linear_response(
+        steps(&times.array, |t, dt| ramsey.h(t).for_duration(dt)),
+        initial,
+        perturbation,
+    );
     // Each response is to a kick after its propagation step.
     let kick_times = Linspace {
         step: times.step,
