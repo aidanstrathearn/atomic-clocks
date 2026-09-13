@@ -103,7 +103,9 @@ where
     /// Pair `i` places the kick after step `i`: `before` includes that step,
     /// while `after` excludes it. The last pair has identity for `after`.
     /// With [`steps`], pairs correspond to `times[1..]`. Empty evolution
-    /// returns an empty vector. Convert steps to affine channels first when
+    /// returns an empty vector. Pair responses therefore correspond to
+    /// `Process::linear_response(...)[1..]`, excluding the initial kick.
+    /// Convert steps to affine channels first when
     /// their representation is not closed under composition.
     pub fn insertion_pairs(self) -> Vec<ChannelPair<S::Item>> {
         let mut before = S::Item::identity();

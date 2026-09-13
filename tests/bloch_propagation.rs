@@ -42,7 +42,7 @@ fn propagation_covers_exactly_the_requested_intervals() {
                     Hamiltonian::new(0.0, 0.0, 1.0).into()
                 )
                 .len(),
-            nsteps
+            nsteps + 1
         );
         for (state, &time) in trajectory.iter().zip(&times.array[1..]) {
             let elapsed = time + 1.0;
@@ -301,23 +301,22 @@ fn assert_linear_response_matches_finite_kicks(channels: &[Unitary]) {
             Observable::ground_projector(),
             perturbation.into(),
         );
+        assert_eq!(responses.len(), channels.len() + 1);
         for (kick_index, response) in responses.into_iter().enumerate() {
-            assert_close(
-                pairs[kick_index].linear_response(
-                    initial,
-                    Observable::ground_projector(),
-                    perturbation.into(),
-                ),
-                response,
-            );
+            if kick_index > 0 {
+                assert_close(
+                    pairs[kick_index - 1].linear_response(
+                        initial,
+                        Observable::ground_projector(),
+                        perturbation.into(),
+                    ),
+                    response,
+                );
+            }
             let probability = |strength| {
-                let mut state = initial;
-                for (i, channel) in channels.iter().enumerate() {
-                    state = channel.apply_to(state);
-                    if i == kick_index {
-                        state = Unitary::from_hamiltonian(perturbation, strength).apply_to(state);
-                    }
-                }
+                let before = Process::new(&channels[..kick_index]).propagate_to_final(initial);
+                let kicked = Unitary::from_hamiltonian(perturbation, strength).apply_to(before);
+                let state = Process::new(&channels[kick_index..]).propagate_to_final(kicked);
                 state.ground_probability()
             };
             let derivative = (probability(epsilon) - probability(-epsilon)) / (2.0 * epsilon);
@@ -344,8 +343,9 @@ fn linear_response_handles_identity_and_empty_evolution() {
         Observable::ground_projector(),
         perturbation.into(),
     );
-    assert_eq!(response.len(), 1);
+    assert_eq!(response.len(), 2);
     assert_close(response[0], 0.5);
+    assert_close(response[1], 0.5);
 
     let pairs = Process::new([Unitary::identity()]).insertion_pairs();
     assert_eq!(pairs.len(), 1);
@@ -359,9 +359,11 @@ fn linear_response_handles_identity_and_empty_evolution() {
             .is_empty()
     );
 
-    assert!(
-        Process::new([] as [Unitary; 0])
-            .linear_response(initial, Observable::ground_projector(), perturbation.into())
-            .is_empty()
+    let response = Process::new([] as [Unitary; 0]).linear_response(
+        initial,
+        Observable::ground_projector(),
+        perturbation.into(),
     );
+    assert_eq!(response.len(), 1);
+    assert_close(response[0], 0.5);
 }

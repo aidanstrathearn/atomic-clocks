@@ -16,13 +16,9 @@ fn finite_kick_response<C: Channel>(
     perturbation: Hamiltonian,
 ) -> f64 {
     let measure = |duration| {
-        let mut state = initial;
-        for (i, channel) in channels.iter().enumerate() {
-            state = channel.apply_to(state);
-            if i == kick_index {
-                state = perturbation.for_duration(duration).apply_to(state);
-            }
-        }
+        let before = Process::new(&channels[..kick_index]).propagate_to_final(initial);
+        let kicked = perturbation.for_duration(duration).apply_to(before);
+        let state = Process::new(&channels[kick_index..]).propagate_to_final(kicked);
         observable.expectation(state)
     };
     let epsilon = 1e-5;
@@ -78,14 +74,17 @@ fn assert_response_contractions<C: Channel>(channels: &[C]) {
                     observable,
                     perturbation.into(),
                 );
-                assert_eq!(direct.len(), channels.len());
-                for (i, (pair, response)) in pairs.iter().zip(direct).enumerate() {
-                    let expected =
-                        finite_kick_response(channels, i, initial, observable, perturbation);
-                    assert_close(response, expected);
+                assert_eq!(direct.len(), channels.len() + 1);
+                for (i, &response) in direct.iter().enumerate() {
+                    assert_close(
+                        response,
+                        finite_kick_response(channels, i, initial, observable, perturbation),
+                    );
+                }
+                for (i, pair) in pairs.iter().enumerate() {
                     assert_close(
                         pair.linear_response(initial, observable, perturbation.into()),
-                        expected,
+                        direct[i + 1],
                     );
 
                     // The open slot must be at the specified boundary, even
@@ -153,7 +152,8 @@ fn reset_channel_erases_earlier_responses_without_an_inverse() {
         Hamiltonian::new(0.4, -0.7, 1.1).into(),
     );
     assert_eq!(response[0], 0.0);
-    assert!(response[1].abs() > 1e-3);
+    assert_eq!(response[1], 0.0);
+    assert!(response[2].abs() > 1e-3);
 }
 
 #[test]
@@ -191,6 +191,7 @@ fn direct_response_uses_borrowed_channel_vector_operations() {
     let perturbation = Hamiltonian::new(0.4, -0.7, 1.1);
     let response =
         Process::new(&channels).linear_response(initial, observable, perturbation.into());
+    assert_eq!(response.len(), channels.len() + 1);
     for (i, actual) in response.into_iter().enumerate() {
         assert_close(
             actual,
@@ -225,7 +226,7 @@ fn identity_terms_do_not_contribute_to_readout_or_kick_response() {
             z: 0.0,
         },
     );
-    let expected: Vec<_> = (0..channels.len())
+    let expected: Vec<_> = (0..=channels.len())
         .map(|i| finite_kick_response(&channels, i, initial, observable, hamiltonian))
         .collect();
     assert!(expected.iter().any(|r| r.abs() > 1e-3));
@@ -234,8 +235,11 @@ fn identity_terms_do_not_contribute_to_readout_or_kick_response() {
         let shifted_readout = Observable::new(scalar, observable.vector());
         let shifted_kick = Observable::new(scalar, kick.vector());
         let direct = Process::new(channels).linear_response(initial, shifted_readout, shifted_kick);
-        for ((pair, actual), expected) in pairs.iter().zip(direct).zip(&expected) {
+        assert_eq!(direct.len(), expected.len());
+        for (actual, expected) in direct.into_iter().zip(&expected) {
             assert_close(actual, *expected);
+        }
+        for (pair, expected) in pairs.iter().zip(&expected[1..]) {
             assert_close(
                 pair.linear_response(initial, shifted_readout, shifted_kick),
                 *expected,

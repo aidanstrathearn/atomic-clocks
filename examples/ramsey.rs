@@ -107,12 +107,8 @@ fn temporal_response(params: &mut Params) -> (Linspace, Vec<f64>) {
     let observable = Observable::ground_projector();
     let response = Process::new(steps(&times.array, |t, dt| ramsey.h(t).for_duration(dt)))
         .linear_response(initial, observable, perturbation.into());
-    // Each response is to a kick after its propagation step.
-    let kick_times = Linspace {
-        step: times.step,
-        array: times.array.into_iter().skip(1).collect(),
-    };
-    (kick_times, response)
+    // Responses include kicks at both the initial and final time boundaries.
+    (times, response)
 }
 
 fn response_plot(params: &mut Params) -> AppResult {

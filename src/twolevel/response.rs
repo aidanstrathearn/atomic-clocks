@@ -17,7 +17,8 @@ impl<S: IntoIterator> Process<S>
 where
     S::Item: Channel,
 {
-    /// Final observable response to a Hamiltonian kick after each step.
+    /// Final observable response to a Hamiltonian kick at every boundary,
+    /// including before the first step and after the last.
     ///
     /// `perturbation` is the Hermitian kick generator `V`. Results are
     /// derivatives at zero of the final expectation after inserting
@@ -28,8 +29,9 @@ where
     ///
     /// Contracts the initial state forward and the observable backward, using
     /// O(N) work and storage without composing channels. With
-    /// [`steps`](super::process::steps), kicks occur at `times[1..]`, including
-    /// the final boundary. Empty evolution returns an empty vector. These are
+    /// [`steps`](super::process::steps), responses correspond to all of `times`:
+    /// N channels return N + 1 responses. Empty evolution returns the single
+    /// immediate kick response of `initial`. These are
     /// kick responses; continuously applied perturbations require time integration.
     ///
     /// ```
@@ -42,8 +44,10 @@ where
     /// let observable = Observable::ground_projector();
     /// let kick = Observable::from(Hamiltonian::new(0.4, -0.7, 1.1));
     /// let direct = Process::new(&channels).linear_response(initial, observable, kick);
+    /// assert_eq!(direct.len(), times.len());
     /// let pairs = Process::new(channels.iter().copied()).insertion_pairs();
-    /// for (pair, expected) in pairs.iter().zip(direct) {
+    /// // Insertion pairs exclude the initial boundary.
+    /// for (pair, expected) in pairs.iter().zip(&direct[1..]) {
     ///     assert!((pair.linear_response(initial, observable, kick) - expected).abs() < 1e-12);
     /// }
     /// ```
@@ -63,12 +67,15 @@ where
             })
             .collect();
 
-        let mut responses = vec![0.0; trajectory.len()];
+        let mut responses = vec![0.0; trajectory.len() + 1];
         let mut measurement = observable.vector();
-        for ((step, forward_state), response) in trajectory.into_iter().zip(&mut responses).rev() {
+        for ((step, forward_state), response) in
+            trajectory.into_iter().zip(&mut responses[1..]).rev()
+        {
             *response = measurement.dot(kick_variation(perturbation, forward_state));
             measurement = step.pull_back_traceless_observable(measurement);
         }
+        responses[0] = measurement.dot(kick_variation(perturbation, initial));
         responses
     }
 }

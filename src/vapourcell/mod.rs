@@ -3,8 +3,8 @@ use std::f64::consts::PI;
 use crate::maths::demodulation::{Demodulation, ModulationParams, lockin_period};
 use crate::maths::linspace;
 use crate::twolevel::{
-    BlochVec, Channel, ComposableChannel, Decay, Hamiltonian, Liouvillian, Observable, Process,
-    TimeDependentHamiltonian, Unitary, Vec3, steps,
+    BlochVec, Decay, Hamiltonian, Liouvillian, Observable, Process, TimeDependentHamiltonian, Vec3,
+    steps,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -282,7 +282,6 @@ pub fn compute_linear_response(
     let mut response = vec![vec![0.0; delays.len()]; times.len()];
     let measurement = Observable::new(0.0, observable);
     let perturbation = Observable::from(Hamiltonian::new(0.0, 0.0, 1.0));
-    let identity = Unitary::identity();
 
     for phase in linspace(0.0, 2.0 * PI, solver.kr_n).into_iter().skip(1) {
         let atom = HamiltonianParams {
@@ -304,14 +303,11 @@ pub fn compute_linear_response(
             std::iter::once(warmed).chain(Process::new(&channels).propagate(warmed));
 
         for (i, (row, initial)) in response.iter_mut().zip(initial_states).enumerate() {
-            // Prepend an identity so linear_response includes the earliest
-            // boundary as well as every subsequent kick, including zero delay.
-            let window = std::iter::once(&identity as &dyn Channel).chain(
-                channels[i..i + delay_steps]
-                    .iter()
-                    .map(|step| step as &dyn Channel),
+            let kicks = Process::new(&channels[i..i + delay_steps]).linear_response(
+                initial,
+                measurement,
+                perturbation,
             );
-            let kicks = Process::new(window).linear_response(initial, measurement, perturbation);
             for (sum, kick) in row.iter_mut().zip(kicks.into_iter().rev()) {
                 *sum += kick / solver.kr_n as f64;
             }
@@ -450,6 +446,7 @@ fn accumulate_projected_trajectory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::twolevel::Channel;
 
     #[test]
     fn spatial_response_matches_finite_kicks_at_absolute_times() {
