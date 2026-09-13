@@ -13,6 +13,17 @@ pub struct Decay {
 }
 
 impl Decay {
+    /// Checks that excitation, decay, and dephasing rates are finite and nonnegative.
+    pub fn validate(self) -> Result<(), String> {
+        if ![self.gamma_up, self.gamma_down, self.gamma_phi]
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0)
+        {
+            return Err("decay rates must be nonnegative and finite".to_string());
+        }
+        Ok(())
+    }
+
     pub fn gamma1(self) -> f64 {
         self.gamma_up + self.gamma_down
     }
