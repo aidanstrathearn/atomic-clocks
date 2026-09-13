@@ -160,6 +160,8 @@ pub struct DemodOutput {
     pub dc: Vec<Demodulation>,
     /// Signed cosine and sine coefficients at the modulation frequency.
     pub harmonic: Vec<Demodulation>,
+    /// Signed cosine and sine coefficients at twice the modulation frequency.
+    pub second_harmonic: Vec<Demodulation>,
 }
 
 /// Sampling for the spatially averaged detuning response at one velocity.
@@ -395,6 +397,7 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
 
     let mut dc = Vec::with_capacity(hz_array.len());
     let mut harmonic = Vec::with_capacity(hz_array.len());
+    let mut second_harmonic = Vec::with_capacity(hz_array.len());
 
     for &hz_offset in &hz_array {
         let mut projected = vec![0.0; last_period_samples];
@@ -422,12 +425,14 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
 
         dc.push(lockin_period(&projected, 0));
         harmonic.push(lockin_period(&projected, 1));
+        second_harmonic.push(lockin_period(&projected, 2));
     }
 
     Ok(DemodOutput {
         hz: hz_array,
         dc,
         harmonic,
+        second_harmonic,
     })
 }
 
@@ -492,13 +497,22 @@ mod tests {
     #[test]
     fn response_demodulation_resolves_time_harmonics_at_each_delay() {
         let times = linspace(0.0, 2.0 * PI, 16);
-        let coefficients = [(1.2, -0.3, 0.7), (-0.4, 1.1, -0.2), (0.0, -0.8, -0.6)];
+        let coefficients = [
+            (1.2, -0.3, 0.7, 0.4, -0.9),
+            (-0.4, 1.1, -0.2, -0.6, 0.3),
+            (0.0, -0.8, -0.6, 0.2, 0.5),
+        ];
         let response = times
             .iter()
             .map(|t| {
                 coefficients
                     .iter()
-                    .map(|&(mean, cosine, sine)| mean + cosine * t.cos() + sine * t.sin())
+                    .map(|&(mean, cosine, sine, cosine2, sine2)| {
+                        mean + cosine * t.cos()
+                            + sine * t.sin()
+                            + cosine2 * (2.0 * t).cos()
+                            + sine2 * (2.0 * t).sin()
+                    })
                     .collect()
             })
             .collect();
@@ -509,13 +523,17 @@ mod tests {
         };
         let dc = output.demodulate(0);
         let harmonic = output.demodulate(1);
+        let second_harmonic = output.demodulate(2);
         assert_eq!(dc.len(), output.delays.len());
         assert_eq!(harmonic.len(), output.delays.len());
-        for (j, (mean, cosine, sine)) in coefficients.into_iter().enumerate() {
+        assert_eq!(second_harmonic.len(), output.delays.len());
+        for (j, (mean, cosine, sine, cosine2, sine2)) in coefficients.into_iter().enumerate() {
             assert!((dc[j].in_phase - 2.0 * mean).abs() < 1e-12);
             assert_eq!(dc[j].quadrature, 0.0);
             assert!((harmonic[j].in_phase - cosine).abs() < 1e-12);
             assert!((harmonic[j].quadrature - sine).abs() < 1e-12);
+            assert!((second_harmonic[j].in_phase - cosine2).abs() < 1e-12);
+            assert!((second_harmonic[j].quadrature - sine2).abs() < 1e-12);
         }
     }
 
@@ -732,7 +750,7 @@ mod tests {
                 .expect("default scan succeeds");
             assert_eq!(output.hz.len(), params.solver.hz_num);
             assert!(output.hz.iter().all(|value| value.is_finite()));
-            for values in [&output.dc, &output.harmonic] {
+            for values in [&output.dc, &output.harmonic, &output.second_harmonic] {
                 assert_eq!(values.len(), params.solver.hz_num);
                 assert!(
                     values
@@ -787,7 +805,7 @@ mod tests {
                 };
                 let output = compute_demod(&params, observable).unwrap();
                 assert_eq!(output.hz[1], 0.0);
-                let mut expected = [0.0; 3];
+                let mut expected = [0.0; 5];
                 for i in 0..=8 {
                     let t = (periods - 1) as f64 * 2.0 * PI + i as f64 * PI / 4.0;
                     let signal =
@@ -797,11 +815,15 @@ mod tests {
                     expected[0] += weight * signal;
                     expected[1] += weight * signal * t.cos();
                     expected[2] += weight * signal * t.sin();
+                    expected[3] += weight * signal * (2.0 * t).cos();
+                    expected[4] += weight * signal * (2.0 * t).sin();
                 }
                 for (actual, expected) in [
                     (output.dc[1].in_phase, expected[0]),
                     (output.harmonic[1].in_phase, expected[1]),
                     (output.harmonic[1].quadrature, expected[2]),
+                    (output.second_harmonic[1].in_phase, expected[3]),
+                    (output.second_harmonic[1].quadrature, expected[4]),
                 ] {
                     assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
                 }
