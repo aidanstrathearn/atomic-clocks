@@ -1,6 +1,7 @@
 use atomic_clocks::maths::Mat3;
 use atomic_clocks::twolevel::{
-    AffineChannel, BlochVec, Channel, Decay, Hamiltonian, Liouvillian, Process, Unitary, Vec3,
+    AffineChannel, BlochVec, Channel, Decay, Hamiltonian, Liouvillian, Observable, Process,
+    Unitary, Vec3,
 };
 
 fn assert_close(actual: f64, expected: f64) {
@@ -11,7 +12,7 @@ fn finite_kick_response<C: Channel>(
     channels: &[C],
     kick_index: usize,
     initial: BlochVec,
-    observable: Vec3,
+    observable: Observable,
     perturbation: Hamiltonian,
 ) -> f64 {
     let measure = |duration| {
@@ -22,7 +23,7 @@ fn finite_kick_response<C: Channel>(
                 state = perturbation.for_duration(duration).apply_to(state);
             }
         }
-        observable.dot(state.r)
+        observable.expectation(state)
     };
     let epsilon = 1e-5;
     (measure(epsilon) - measure(-epsilon)) / (2.0 * epsilon)
@@ -50,31 +51,40 @@ fn assert_response_contractions<C: Channel>(channels: &[C]) {
         },
     ] {
         for observable in [
-            BlochVec::ground().r * 0.5,
-            Vec3 {
-                x: 0.7,
-                y: -0.4,
-                z: 0.2,
-            },
-            Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
+            Observable::ground_projector(),
+            Observable::new(
+                0.3,
+                Vec3 {
+                    x: 0.7,
+                    y: -0.4,
+                    z: 0.2,
+                },
+            ),
+            Observable::new(
+                0.0,
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ),
         ] {
             for perturbation in [
                 Hamiltonian::new(0.4, -0.7, 1.1),
                 Hamiltonian::new(-0.8, 0.3, 0.2),
             ] {
-                let direct =
-                    Process::new(channels).linear_response(initial, observable, perturbation);
+                let direct = Process::new(channels).linear_response(
+                    initial,
+                    observable,
+                    perturbation.into(),
+                );
                 assert_eq!(direct.len(), channels.len());
                 for (i, (pair, response)) in pairs.iter().zip(direct).enumerate() {
                     let expected =
                         finite_kick_response(channels, i, initial, observable, perturbation);
                     assert_close(response, expected);
                     assert_close(
-                        pair.linear_response(initial, observable, perturbation),
+                        pair.linear_response(initial, observable, perturbation.into()),
                         expected,
                     );
 
@@ -132,12 +142,15 @@ fn reset_channel_erases_earlier_responses_without_an_inverse() {
     assert_response_contractions(&channels);
     let response = Process::new(channels).linear_response(
         BlochVec::ground(),
-        Vec3 {
-            x: 0.7,
-            y: -0.4,
-            z: 0.2,
-        },
-        Hamiltonian::new(0.4, -0.7, 1.1),
+        Observable::new(
+            0.0,
+            Vec3 {
+                x: 0.7,
+                y: -0.4,
+                z: 0.2,
+            },
+        ),
+        Hamiltonian::new(0.4, -0.7, 1.1).into(),
     );
     assert_eq!(response[0], 0.0);
     assert!(response[1].abs() > 1e-3);
@@ -167,17 +180,83 @@ fn direct_response_uses_borrowed_channel_vector_operations() {
         PreparedRotation(Hamiltonian::new(-0.8, 0.9, 0.1).for_duration(0.7)),
     ];
     let initial = BlochVec::ground();
-    let observable = Vec3 {
-        x: 0.7,
-        y: -0.4,
-        z: 0.2,
-    };
+    let observable = Observable::new(
+        0.0,
+        Vec3 {
+            x: 0.7,
+            y: -0.4,
+            z: 0.2,
+        },
+    );
     let perturbation = Hamiltonian::new(0.4, -0.7, 1.1);
-    let response = Process::new(&channels).linear_response(initial, observable, perturbation);
+    let response =
+        Process::new(&channels).linear_response(initial, observable, perturbation.into());
     for (i, actual) in response.into_iter().enumerate() {
         assert_close(
             actual,
             finite_kick_response(&channels, i, initial, observable, perturbation),
         );
     }
+}
+
+#[test]
+fn identity_terms_do_not_contribute_to_readout_or_kick_response() {
+    let damping = Liouvillian {
+        hamiltonian: Hamiltonian::new(1.3, -0.4, 0.7),
+        decay: Decay {
+            gamma_up: 0.2,
+            gamma_down: 0.8,
+            gamma_phi: 0.3,
+        },
+    }
+    .for_duration(0.3);
+    let pulse = Hamiltonian::new(-0.6, 0.9, -0.5).for_duration(0.7);
+    let channels: [&dyn Channel; 2] = [&damping, &pulse];
+    let pairs = Process::new(channels.map(Channel::to_affine)).insertion_pairs();
+    let initial = BlochVec::ground();
+    let observable = Observable::ground_projector();
+    let hamiltonian = Hamiltonian::new(0.4, -0.7, 1.1);
+    let kick = Observable::from(hamiltonian);
+    let identity = Observable::new(
+        1.0,
+        Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    );
+    let expected: Vec<_> = (0..channels.len())
+        .map(|i| finite_kick_response(&channels, i, initial, observable, hamiltonian))
+        .collect();
+    assert!(expected.iter().any(|r| r.abs() > 1e-3));
+
+    for scalar in [0.0, 0.5, -2.0] {
+        let shifted_readout = Observable::new(scalar, observable.vector());
+        let shifted_kick = Observable::new(scalar, kick.vector());
+        let direct = Process::new(channels).linear_response(initial, shifted_readout, shifted_kick);
+        for ((pair, actual), expected) in pairs.iter().zip(direct).zip(&expected) {
+            assert_close(actual, *expected);
+            assert_close(
+                pair.linear_response(initial, shifted_readout, shifted_kick),
+                *expected,
+            );
+            assert_eq!(pair.linear_response(initial, identity, shifted_kick), 0.0);
+            assert_eq!(
+                pair.linear_response(initial, shifted_readout, identity),
+                0.0
+            );
+        }
+    }
+    assert!(
+        Process::new(channels)
+            .linear_response(initial, identity, kick)
+            .iter()
+            .all(|r| *r == 0.0)
+    );
+    assert!(
+        Process::new(channels)
+            .linear_response(initial, observable, identity)
+            .iter()
+            .all(|r| *r == 0.0)
+    );
 }

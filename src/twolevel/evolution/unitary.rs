@@ -1,33 +1,9 @@
+//! Hamiltonian evolution and unitary channel construction.
+
 use crate::maths::mat3::Mat3;
 use crate::maths::vec3::Vec3;
 
-use super::{AffineChannel, Channel, ComposableChannel, Process};
-
-#[derive(Copy, Clone)]
-pub struct BlochVec {
-    pub r: Vec3,
-}
-
-impl BlochVec {
-    pub fn ground() -> Self {
-        Self {
-            r: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: -1.0,
-            },
-        }
-    }
-    pub fn excited_probability(&self) -> f64 {
-        // The excited state lies at r.z = +1.
-        0.5 * (1.0 + self.r.z)
-    }
-
-    pub fn ground_probability(&self) -> f64 {
-        // The excited state lies at r.z = +1.
-        0.5 * (1.0 - self.r.z)
-    }
-}
+use crate::twolevel::{AffineChannel, BlochVec, Channel, ComposableChannel, Observable, Process};
 
 #[derive(Copy, Clone)]
 pub struct TrotterConfig {
@@ -241,6 +217,13 @@ impl Hamiltonian {
             c: cos_theta,
             u: v * (sin_theta / angle),
         }
+    }
+}
+
+impl From<Hamiltonian> for Observable {
+    /// Preserve `H = h.sigma / 2` in the observable convention `a I + o.sigma`.
+    fn from(hamiltonian: Hamiltonian) -> Self {
+        Self::new(0.0, hamiltonian.r * 0.5)
     }
 }
 

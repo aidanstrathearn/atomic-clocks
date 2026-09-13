@@ -1,6 +1,8 @@
 use crate::maths::mat3::Mat3;
 
-use super::{BlochVec, Vec3};
+use crate::maths::vec3::Vec3;
+
+use super::state::BlochVec;
 
 /// A deterministic, completely positive, trace-preserving qubit map.
 ///

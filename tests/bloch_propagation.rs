@@ -2,8 +2,8 @@ use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::Linspace;
 use atomic_clocks::maths::vec3::Vec3;
 use atomic_clocks::twolevel::{
-    BlochVec, Channel, ComposableChannel, Hamiltonian, Process, TimeDependentHamiltonian,
-    TrotterConfig, Unitary, steps,
+    BlochVec, Channel, ComposableChannel, Hamiltonian, Observable, Process,
+    TimeDependentHamiltonian, TrotterConfig, Unitary, steps,
 };
 
 fn assert_close(actual: f64, expected: f64) {
@@ -38,8 +38,8 @@ fn propagation_covers_exactly_the_requested_intervals() {
             Process::new(channels())
                 .linear_response(
                     initial,
-                    BlochVec::ground().r * 0.5,
-                    Hamiltonian::new(0.0, 0.0, 1.0)
+                    Observable::ground_projector(),
+                    Hamiltonian::new(0.0, 0.0, 1.0).into()
                 )
                 .len(),
             nsteps
@@ -298,15 +298,15 @@ fn assert_linear_response_matches_finite_kicks(channels: &[Unitary]) {
     ] {
         let responses = Process::new(channels).linear_response(
             initial,
-            BlochVec::ground().r * 0.5,
-            perturbation,
+            Observable::ground_projector(),
+            perturbation.into(),
         );
         for (kick_index, response) in responses.into_iter().enumerate() {
             assert_close(
                 pairs[kick_index].linear_response(
                     initial,
-                    BlochVec::ground().r * 0.5,
-                    perturbation,
+                    Observable::ground_projector(),
+                    perturbation.into(),
                 ),
                 response,
             );
@@ -341,8 +341,8 @@ fn linear_response_handles_identity_and_empty_evolution() {
     let perturbation = Hamiltonian::new(0.0, 1.0, 0.0);
     let response = Process::new([Unitary::identity()]).linear_response(
         initial,
-        BlochVec::ground().r * 0.5,
-        perturbation,
+        Observable::ground_projector(),
+        perturbation.into(),
     );
     assert_eq!(response.len(), 1);
     assert_close(response[0], 0.5);
@@ -350,7 +350,7 @@ fn linear_response_handles_identity_and_empty_evolution() {
     let pairs = Process::new([Unitary::identity()]).insertion_pairs();
     assert_eq!(pairs.len(), 1);
     assert_close(
-        pairs[0].linear_response(initial, BlochVec::ground().r * 0.5, perturbation),
+        pairs[0].linear_response(initial, Observable::ground_projector(), perturbation.into()),
         0.5,
     );
     assert!(
@@ -361,7 +361,7 @@ fn linear_response_handles_identity_and_empty_evolution() {
 
     assert!(
         Process::new([] as [Unitary; 0])
-            .linear_response(initial, BlochVec::ground().r * 0.5, perturbation)
+            .linear_response(initial, Observable::ground_projector(), perturbation.into())
             .is_empty()
     );
 }

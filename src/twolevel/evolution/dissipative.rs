@@ -1,7 +1,9 @@
+//! Liouvillian evolution with excitation, decay, and dephasing.
+
 use crate::maths::Mat3;
 use crate::maths::complex::Complex;
 
-use super::{AffineChannel, BlochVec, Channel, Hamiltonian, Vec3};
+use crate::twolevel::{AffineChannel, BlochVec, Channel, Hamiltonian, Vec3};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Decay {

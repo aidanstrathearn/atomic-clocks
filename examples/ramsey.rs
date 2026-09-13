@@ -3,8 +3,8 @@ use std::f64::consts::PI;
 use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::{Linspace, fourier_transform, linspace};
 use atomic_clocks::twolevel::{
-    BlochVec, Channel, Hamiltonian, Process, TimeDependentHamiltonian, TrotterConfig, Unitary,
-    Vec3, steps,
+    BlochVec, Channel, Hamiltonian, Observable, Process, TimeDependentHamiltonian, TrotterConfig,
+    Unitary, steps,
 };
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
@@ -53,6 +53,7 @@ fn controls(params: &mut Params) -> SliderGrid<'_> {
 
 fn signal_plot(params: &mut Params) -> AppResult {
     let initial = BlochVec::ground();
+    let observable = Observable::ground_projector();
     let detuning_limit = 4.0 / params.pulse_width;
     params.detuning = params.detuning.clamp(-detuning_limit, detuning_limit);
     let detunings = linspace(-detuning_limit, detuning_limit, N_DETUNINGS - 1);
@@ -75,7 +76,7 @@ fn signal_plot(params: &mut Params) -> AppResult {
                 tolerance: 0.0,
             },
         );
-        signal.push(unitary.apply_to(initial).ground_probability());
+        signal.push(observable.expectation(unitary.apply_to(initial)));
     }
 
     let mut plot = Plotter::new();
@@ -103,14 +104,9 @@ fn temporal_response(params: &mut Params) -> (Linspace, Vec<f64>) {
     };
     // Hamiltonian stores h in h.sigma / 2, so h.z = 2 represents sigma_z.
     let perturbation = Hamiltonian::new(0.0, 0.0, 2.0);
-    // Ground projector: O = I / 2 - sigma_z / 2.
-    let observable = Vec3 {
-        x: 0.0,
-        y: 0.0,
-        z: -0.5,
-    };
+    let observable = Observable::ground_projector();
     let response = Process::new(steps(&times.array, |t, dt| ramsey.h(t).for_duration(dt)))
-        .linear_response(initial, observable, perturbation);
+        .linear_response(initial, observable, perturbation.into());
     // Each response is to a kick after its propagation step.
     let kick_times = Linspace {
         step: times.step,

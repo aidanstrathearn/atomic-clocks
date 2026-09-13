@@ -1,10 +1,16 @@
 mod channel;
-mod nonunitary;
-mod operator;
-pub mod propagation;
+mod evolution;
+mod observable;
+pub mod process;
+mod response;
+mod state;
 
 pub use crate::maths::vec3::Vec3;
 pub use channel::{AffineChannel, Channel, ComposableChannel};
-pub use nonunitary::{Decay, DissipativeStep, Liouvillian};
-pub use operator::{BlochVec, Hamiltonian, TimeDependentHamiltonian, TrotterConfig, Unitary};
-pub use propagation::{ChannelPair, Process, steps};
+pub use evolution::{
+    Decay, DissipativeStep, Hamiltonian, Liouvillian, TimeDependentHamiltonian, TrotterConfig,
+    Unitary,
+};
+pub use observable::Observable;
+pub use process::{ChannelPair, Process, steps};
+pub use state::BlochVec;
