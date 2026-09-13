@@ -231,6 +231,47 @@ pub struct LinearResponseOutput {
     pub response: Vec<Vec<f64>>,
 }
 
+impl LinearResponseOutput {
+    /// Demodulates observation time at each fixed delay using [`lockin_period`].
+    /// Returns one signed cosine/sine coefficient pair per entry in `delays`.
+    /// The reference phase follows observation time, not the earlier kick time.
+    ///
+    /// As in [`lockin_period`], harmonic zero returns twice the signed mean in
+    /// `in_phase` and zero `quadrature`. Divide by two for the mean response.
+    /// Results remain delay-dependent kernels, without delay-integration weights.
+    ///
+    /// Assumes uniform observation times spanning one complete modulation period,
+    /// including both endpoints, as supplied by [`compute_linear_response`].
+    /// Panics if the response dimensions do not match the axes or there are fewer
+    /// than two observation times.
+    pub fn demodulate(&self, harmonic: usize) -> Vec<Demodulation> {
+        assert!(
+            self.times.len() >= 2,
+            "lock-in requires at least two samples"
+        );
+        assert_eq!(
+            self.response.len(),
+            self.times.len(),
+            "response must match observation times"
+        );
+        assert!(
+            self.response
+                .iter()
+                .all(|row| row.len() == self.delays.len()),
+            "response rows must match delays",
+        );
+        let mut column = vec![0.0; self.times.len()];
+        (0..self.delays.len())
+            .map(|delay| {
+                for (sample, row) in column.iter_mut().zip(&self.response) {
+                    *sample = row[delay];
+                }
+                lockin_period(&column, harmonic)
+            })
+            .collect()
+    }
+}
+
 /// Spatially averages the response of `observable · sigma` to a change in `delta`.
 /// Uses exactly `hamiltonian.kv` and `hamiltonian.delta`, with no detuning scan or
 /// velocity averaging. The observable is constant in `hamiltonian.frame` and its
@@ -447,6 +488,36 @@ fn accumulate_projected_trajectory(
 mod tests {
     use super::*;
     use crate::twolevel::Channel;
+
+    #[test]
+    fn response_demodulation_resolves_time_harmonics_at_each_delay() {
+        let times = linspace(0.0, 2.0 * PI, 16);
+        let coefficients = [(1.2, -0.3, 0.7), (-0.4, 1.1, -0.2), (0.0, -0.8, -0.6)];
+        let response = times
+            .iter()
+            .map(|t| {
+                coefficients
+                    .iter()
+                    .map(|&(mean, cosine, sine)| mean + cosine * t.cos() + sine * t.sin())
+                    .collect()
+            })
+            .collect();
+        let output = LinearResponseOutput {
+            times,
+            delays: vec![0.0, 0.3, 1.7],
+            response,
+        };
+        let dc = output.demodulate(0);
+        let harmonic = output.demodulate(1);
+        assert_eq!(dc.len(), output.delays.len());
+        assert_eq!(harmonic.len(), output.delays.len());
+        for (j, (mean, cosine, sine)) in coefficients.into_iter().enumerate() {
+            assert!((dc[j].in_phase - 2.0 * mean).abs() < 1e-12);
+            assert_eq!(dc[j].quadrature, 0.0);
+            assert!((harmonic[j].in_phase - cosine).abs() < 1e-12);
+            assert!((harmonic[j].quadrature - sine).abs() < 1e-12);
+        }
+    }
 
     #[test]
     fn spatial_response_matches_finite_kicks_at_absolute_times() {
