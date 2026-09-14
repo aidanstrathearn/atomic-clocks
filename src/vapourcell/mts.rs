@@ -31,6 +31,32 @@ impl Default for MtsSolverParams {
     }
 }
 
+impl MtsSolverParams {
+    /// Validates spatial sampling, integration, and detuning scan settings.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.kr_n == 0 {
+            return Err("kr_n must be positive".to_string());
+        }
+        if self.n_periods == 0 {
+            return Err("n_periods must be positive".to_string());
+        }
+        if self.steps_per_period == 0 {
+            return Err("steps_per_period must be positive".to_string());
+        }
+        if self.hz_num == 0 {
+            return Err("hz_num must be positive".to_string());
+        }
+        if !self.hz_lim.is_finite() || self.hz_lim < 0.0 {
+            return Err("hz_lim must be finite and nonnegative".to_string());
+        }
+        self.n_periods
+            .checked_mul(self.steps_per_period)
+            .and_then(|steps| steps.checked_add(1))
+            .ok_or("MTS time grid is too large")?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct MtsParams {
     pub hamiltonian: HamiltonianParams,
@@ -52,6 +78,15 @@ impl Default for MtsParams {
     }
 }
 
+impl MtsParams {
+    /// Validates the Hamiltonian, decay, and solver configuration.
+    pub fn validate(&self) -> Result<(), String> {
+        self.hamiltonian.validate()?;
+        self.decay.validate()?;
+        self.solver.validate()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DemodOutput {
     /// Detuning offsets relative to the Hamiltonian's `delta`.
@@ -69,7 +104,7 @@ pub struct DemodOutput {
 /// The observable is constant in that frame and is not normalized; its magnitude
 /// scales the measured signal.
 pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput, String> {
-    validate_params(params)?;
+    params.validate()?;
 
     let t_array = time_grid(
         params.hamiltonian.modulation.period(),
@@ -133,27 +168,6 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
         harmonic,
         second_harmonic,
     })
-}
-
-fn validate_params(params: &MtsParams) -> Result<(), String> {
-    if !params.hamiltonian.modulation.frequency.is_finite()
-        || params.hamiltonian.modulation.frequency <= 0.0
-    {
-        return Err("mod_freq must be positive and finite".to_string());
-    }
-    if params.solver.kr_n == 0 {
-        return Err("kr_n must be positive".to_string());
-    }
-    if params.solver.n_periods == 0 {
-        return Err("n_periods must be positive".to_string());
-    }
-    if params.solver.steps_per_period == 0 {
-        return Err("steps_per_period must be positive".to_string());
-    }
-    if params.solver.hz_num == 0 {
-        return Err("hz_num must be positive".to_string());
-    }
-    Ok(())
 }
 
 fn time_grid(period: f64, steps_per_period: usize, n_periods: usize) -> Vec<f64> {

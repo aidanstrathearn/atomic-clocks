@@ -56,22 +56,12 @@ impl Default for HamiltonianParams {
 impl HamiltonianParams {
     /// Checks for a positive, finite modulation frequency and finite coefficients.
     pub fn validate(&self) -> Result<(), String> {
-        if !self.modulation.frequency.is_finite() || self.modulation.frequency <= 0.0 {
-            return Err("mod_freq must be positive and finite".to_string());
-        }
-        if ![
-            self.modulation.depth,
-            self.modulation.shift,
-            self.delta,
-            self.r_pump,
-            self.r_prbe,
-            self.kv,
-            self.kr,
-        ]
-        .iter()
-        .all(|value| value.is_finite())
+        self.modulation.validate()?;
+        if ![self.delta, self.r_pump, self.r_prbe, self.kv, self.kr]
+            .iter()
+            .all(|value| value.is_finite())
         {
-            return Err("Hamiltonian and observable coefficients must be finite".to_string());
+            return Err("Hamiltonian coefficients must be finite".to_string());
         }
         Ok(())
     }

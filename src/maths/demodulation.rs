@@ -21,6 +21,17 @@ impl Default for ModulationParams {
 }
 
 impl ModulationParams {
+    /// Validates the modulation frequency, depth, and shift.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.frequency.is_finite() || self.frequency <= 0.0 {
+            return Err("mod_freq must be positive and finite".to_string());
+        }
+        if !self.depth.is_finite() || !self.shift.is_finite() {
+            return Err("modulation depth and shift must be finite".to_string());
+        }
+        Ok(())
+    }
+
     /// Dimensionless phase-modulation amplitude.
     pub fn mod_index(&self) -> f64 {
         self.depth / self.frequency
