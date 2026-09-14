@@ -192,9 +192,10 @@ fn accumulate_projected_trajectory(
         }
         .for_duration(dt)
     };
-    let warmed = Process::new(steps(&t_array[..=last_start], &step_at))
-        .propagate_to_final(BlochVec::ground());
-    let window = Process::new(steps(&t_array[last_start..], &step_at)).trajectory(warmed);
+    let mut channels = steps(t_array, &step_at);
+    let warmed =
+        Process::new(channels.by_ref().take(last_start)).propagate_to_final(BlochVec::ground());
+    let window = Process::new(channels).trajectory(warmed);
     for (sum, state) in projected.iter_mut().zip(window) {
         *sum += state.r.dot(observable);
     }

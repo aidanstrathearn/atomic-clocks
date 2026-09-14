@@ -182,10 +182,11 @@ pub fn compute_linear_response(
             }
             .for_duration(duration)
         };
-        let warmed = Process::new(steps(&grid[..=warmup_steps], &step_at))
+        let mut channel_steps = steps(&grid, &step_at);
+        let warmed = Process::new(channel_steps.by_ref().take(warmup_steps))
             .propagate_to_final(BlochVec::ground());
 
-        let channels: Vec<_> = steps(&grid[warmup_steps..], &step_at).collect();
+        let channels: Vec<_> = channel_steps.collect();
         let initial_states = Process::new(&channels).trajectory(warmed);
 
         for (i, (row, initial)) in response.iter_mut().zip(initial_states).enumerate() {
