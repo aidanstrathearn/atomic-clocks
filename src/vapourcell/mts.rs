@@ -194,9 +194,7 @@ fn accumulate_projected_trajectory(
     };
     let warmed = Process::new(steps(&t_array[..=last_start], &step_at))
         .propagate_to_final(BlochVec::ground());
-    // The observation window includes both its initial and final boundary.
-    let window = std::iter::once(warmed)
-        .chain(Process::new(steps(&t_array[last_start..], &step_at)).propagate(warmed));
+    let window = Process::new(steps(&t_array[last_start..], &step_at)).trajectory(warmed);
     for (sum, state) in projected.iter_mut().zip(window) {
         *sum += state.r.dot(observable);
     }

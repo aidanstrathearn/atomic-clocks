@@ -74,6 +74,13 @@ where
         })
     }
 
+    /// Lazily yield the state at every channel boundary, including `initial`.
+    /// With channels from [`steps`], states correspond to all of `times`.
+    /// Empty evolution returns an iterator containing only `initial`.
+    pub fn trajectory(self, initial: BlochVec) -> impl Iterator<Item = BlochVec> {
+        std::iter::once(initial).chain(self.propagate(initial))
+    }
+
     /// Apply all channels directly without constructing a composed map or
     /// recording a trajectory. Empty evolution returns `initial`.
     pub fn propagate_to_final(self, initial: BlochVec) -> BlochVec {

@@ -123,13 +123,13 @@ fn warmup_and_recording_share_the_window_boundary() {
     let times = [2.0, 2.25, 3.0, 5.0];
     let step_at = |t: f64, dt| Hamiltonian::new(t, 0.0, 0.0).for_duration(dt);
     let initial = BlochVec::ground();
-    let full: Vec<_> = std::iter::once(initial)
-        .chain(Process::new(steps(&times, step_at)).propagate(initial))
+    let full: Vec<_> = Process::new(steps(&times, step_at))
+        .trajectory(initial)
         .collect();
     for start in 0..times.len() {
         let warmed = Process::new(steps(&times[..=start], step_at)).propagate_to_final(initial);
-        let window: Vec<_> = std::iter::once(warmed)
-            .chain(Process::new(steps(&times[start..], step_at)).propagate(warmed))
+        let window: Vec<_> = Process::new(steps(&times[start..], step_at))
+            .trajectory(warmed)
             .collect();
         assert_eq!(window.len(), times.len() - start);
         for (actual, expected) in window.into_iter().zip(&full[start..]) {

@@ -43,7 +43,7 @@ fn projector_readout_matches_probabilities_along_a_trajectory() {
             },
         },
     ] {
-        for state in std::iter::once(initial).chain(Process::new(&channels).propagate(initial)) {
+        for state in Process::new(&channels).trajectory(initial) {
             assert_close(ground.expectation(state), state.ground_probability());
             assert_close(excited.expectation(state), state.excited_probability());
             assert_close(ground.expectation(state) + excited.expectation(state), 1.0);

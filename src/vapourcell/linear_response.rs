@@ -186,8 +186,7 @@ pub fn compute_linear_response(
             .propagate_to_final(BlochVec::ground());
 
         let channels: Vec<_> = steps(&grid[warmup_steps..], &step_at).collect();
-        let initial_states =
-            std::iter::once(warmed).chain(Process::new(&channels).propagate(warmed));
+        let initial_states = Process::new(&channels).trajectory(warmed);
 
         for (i, (row, initial)) in response.iter_mut().zip(initial_states).enumerate() {
             let kicks = Process::new(&channels[i..i + delay_steps]).linear_response(
