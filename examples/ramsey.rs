@@ -2,6 +2,7 @@ use std::f64::consts::{PI, TAU};
 
 use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::{linspace, past_response_transform, Linspace};
+use atomic_clocks::signal_processing::TransferFunctionSamples;
 use atomic_clocks::twolevel::{
     steps, BlochVec, Channel, Hamiltonian, Observable, Process, TimeDependentHamiltonian,
     TrotterConfig, Unitary,
@@ -161,18 +162,19 @@ fn response_plot(params: &mut Params) -> AppResult {
 
 fn frequency_response_plot(params: &mut Params) -> AppResult {
     let (relative_times, response) = temporal_response(params);
-    let spectrum = past_response_transform(
+    let transfer = TransferFunctionSamples::try_from(past_response_transform(
         &response,
         relative_times.step,
         khz_to_angular_frequency(FREQUENCY_STEP_KHZ),
-    );
-    let frequencies_khz: Vec<_> = spectrum
-        .angular_frequencies
+    ))?;
+    let frequencies_khz: Vec<_> = transfer
+        .grid()
+        .values()
         .iter()
         .map(|&frequency| angular_frequency_to_khz(frequency))
         .collect();
-    let magnitude: Vec<_> = spectrum
-        .amplitudes
+    let magnitude: Vec<_> = transfer
+        .response_values()
         .iter()
         .map(|value| value.norm())
         .collect();
@@ -201,8 +203,13 @@ mod tests {
             ..Params::default()
         };
         let (relative_times, response) = temporal_response(&mut params);
-        let spectrum = past_response_transform(&response, relative_times.step, 1.0);
-        let dc_response = spectrum.amplitudes[0].re;
+        let transfer = TransferFunctionSamples::try_from(past_response_transform(
+            &response,
+            relative_times.step,
+            1.0,
+        ))
+        .unwrap();
+        let dc_response = transfer.response_values()[0].re;
 
         let delta_khz = 1.0e-5;
         let finite_difference =
