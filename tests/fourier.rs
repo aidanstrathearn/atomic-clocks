@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use atomic_clocks::maths::fourier_transform;
+use atomic_clocks::maths::{fourier_transform, past_response_transform};
 
 fn assert_close(actual: f64, expected: f64) {
     assert!(
@@ -119,4 +119,16 @@ fn invalid_frequency_spacing_is_rejected() {
     for df in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert!(std::panic::catch_unwind(|| fourier_transform(&[1.0], 0.1, 0.0, df)).is_err());
     }
+}
+
+#[test]
+fn past_response_transform_uses_delay_before_measurement() {
+    // Chronological samples are at tau = [-3, -2, -1, 0]. An impulse at
+    // tau = -1 has a causal delay of one time unit, so G(omega) = exp(-i omega).
+    let spectrum = past_response_transform(&[0.0, 0.0, 1.0, 0.0], 1.0, 100.0);
+    assert_close(spectrum.amplitudes[0].re, 1.0);
+    assert_close(spectrum.amplitudes[0].im, 0.0);
+    assert_close(spectrum.angular_frequencies[1], 0.5 * PI);
+    assert_close(spectrum.amplitudes[1].re, 0.0);
+    assert_close(spectrum.amplitudes[1].im, -1.0);
 }

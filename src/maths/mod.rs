@@ -7,7 +7,7 @@ pub use mat3::Mat3;
 
 use std::f64::consts::PI;
 
-use rustfft::{FftPlanner, num_complex::Complex64};
+use rustfft::{num_complex::Complex64, FftPlanner};
 
 #[derive(Clone)]
 pub struct FourierSpectrum {
@@ -74,6 +74,27 @@ pub fn fourier_transform(samples: &[f64], step: f64, start_time: f64, df: f64) -
         angular_frequencies,
         amplitudes,
     }
+}
+
+/// Converts a real response sampled from the oldest perturbation through the
+/// measurement time into a causal frequency response.
+///
+/// The input order corresponds to relative times `tau <= 0`, ending at
+/// `tau = 0`. For an input proportional to `exp(i * omega * t)`, this returns
+/// `G(omega) = integral g(tau) * exp(i * omega * tau) d tau`. Equivalently,
+/// it reverses the samples onto the nonnegative delay axis before applying the
+/// Fourier convention used by [`fourier_transform`]. Endpoint samples receive
+/// trapezoidal half weights.
+pub fn past_response_transform(samples: &[f64], step: f64, df: f64) -> FourierSpectrum {
+    assert!(
+        samples.len() >= 2,
+        "A past response requires at least two samples"
+    );
+    let mut delayed: Vec<_> = samples.iter().rev().copied().collect();
+    delayed[0] *= 0.5;
+    let last = delayed.len() - 1;
+    delayed[last] *= 0.5;
+    fourier_transform(&delayed, step, 0.0, df)
 }
 
 pub fn normalised_gaussian(x: f64, mu: f64, sigma: f64) -> f64 {
