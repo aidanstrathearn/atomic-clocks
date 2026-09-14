@@ -1,7 +1,7 @@
 use atomic_clocks::maths::FourierSpectrum;
 use atomic_clocks::signal_processing::{
-    AngularFrequencyGrid, FunctionalPsd, LtiFilter, Psd, PsdSamples, SpectrumError,
-    TransferFunctionSamples,
+    AngularFrequencyGrid, Delay, FunctionalPsd, Gain, Integrator, LtiFilter, Psd, PsdSamples,
+    SpectrumError, TransferFunctionSamples,
 };
 use rustfft::num_complex::Complex64;
 
@@ -88,4 +88,39 @@ fn sampled_types_validate_grid_compatibility() {
         PsdSamples::new(negative_grid, vec![1.0, 1.0]).unwrap_err(),
         SpectrumError::NegativePsdFrequency { index: 0 }
     );
+}
+
+#[test]
+fn primitive_filters_have_the_expected_complex_responses() {
+    assert_eq!(
+        Gain::new(-2.0).frequency_response(3.0),
+        Complex64::new(-2.0, 0.0)
+    );
+    assert_eq!(
+        Integrator::new(3.0).frequency_response(2.0),
+        Complex64::new(0.0, -1.5)
+    );
+
+    let delayed = Delay::new(2.0).frequency_response(0.5 * std::f64::consts::PI);
+    assert_close(delayed.re, -1.0);
+    assert_close(delayed.im, 0.0);
+}
+
+#[test]
+fn filters_compose_in_series() {
+    let controller = Gain::new(-2.0).then(Delay::new(0.5));
+    let response = controller.frequency_response(std::f64::consts::PI);
+    assert_close(response.re, 0.0);
+    assert_close(response.im, 2.0);
+}
+
+#[test]
+fn primitive_filters_reject_invalid_parameters() {
+    for invalid_gain in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(std::panic::catch_unwind(|| Gain::new(invalid_gain)).is_err());
+        assert!(std::panic::catch_unwind(|| Integrator::new(invalid_gain)).is_err());
+    }
+    for invalid_delay in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(std::panic::catch_unwind(|| Delay::new(invalid_delay)).is_err());
+    }
 }

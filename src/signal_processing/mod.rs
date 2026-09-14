@@ -9,4 +9,6 @@ mod transfer;
 pub use error::SpectrumError;
 pub use frequency::AngularFrequencyGrid;
 pub use psd::{FunctionalPsd, Psd, PsdSamples, WhiteRw};
-pub use transfer::{FunctionalFilter, Integrator, LtiFilter, TransferFunctionSamples};
+pub use transfer::{
+    Delay, FunctionalFilter, Gain, Integrator, LtiFilter, Series, TransferFunctionSamples,
+};

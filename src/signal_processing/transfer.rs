@@ -69,6 +69,13 @@ pub trait LtiFilter {
                 .collect(),
         )
     }
+
+    fn then<F: LtiFilter>(self, next: F) -> Series<Self, F>
+    where
+        Self: Sized,
+    {
+        Series::new(self, next)
+    }
 }
 
 impl<F: LtiFilter + ?Sized> LtiFilter for &F {
@@ -77,7 +84,68 @@ impl<F: LtiFilter + ?Sized> LtiFilter for &F {
     }
 }
 
-pub struct Integrator;
+/// A real, frequency-independent gain. Signed gains are supported.
+#[derive(Clone, Copy, Debug)]
+pub struct Gain {
+    gain: f64,
+}
+
+impl Gain {
+    pub fn new(gain: f64) -> Self {
+        assert!(gain.is_finite(), "Gain must be finite");
+        Self { gain }
+    }
+}
+
+impl LtiFilter for Gain {
+    fn frequency_response(&self, omega: f64) -> Complex64 {
+        assert!(omega.is_finite());
+        Complex64::new(self.gain, 0.0)
+    }
+}
+
+/// A pure time delay with response `exp(-i omega duration)`.
+#[derive(Clone, Copy, Debug)]
+pub struct Delay {
+    duration: f64,
+}
+
+impl Delay {
+    pub fn new(duration: f64) -> Self {
+        assert!(
+            duration.is_finite() && duration >= 0.0,
+            "Delay duration must be finite and nonnegative"
+        );
+        Self { duration }
+    }
+}
+
+impl LtiFilter for Delay {
+    fn frequency_response(&self, omega: f64) -> Complex64 {
+        assert!(omega.is_finite());
+        let (sin_phase, cos_phase) = (-omega * self.duration).sin_cos();
+        Complex64::new(cos_phase, sin_phase)
+    }
+}
+
+/// An integrator with response `gain / (i omega)`.
+#[derive(Clone, Copy, Debug)]
+pub struct Integrator {
+    gain: f64,
+}
+
+impl Integrator {
+    pub fn new(gain: f64) -> Self {
+        assert!(gain.is_finite(), "Integrator gain must be finite");
+        Self { gain }
+    }
+}
+
+impl Default for Integrator {
+    fn default() -> Self {
+        Self::new(1.0)
+    }
+}
 
 impl LtiFilter for Integrator {
     fn frequency_response(&self, omega: f64) -> Complex64 {
@@ -86,7 +154,27 @@ impl LtiFilter for Integrator {
             omega, 0.0,
             "Integrator response is singular at zero frequency"
         );
-        Complex64::new(0.0, -1.0 / omega)
+        Complex64::new(0.0, -self.gain / omega)
+    }
+}
+
+/// Two scalar LTI filters applied in sequence.
+#[derive(Clone, Copy, Debug)]
+pub struct Series<A, B> {
+    first: A,
+    second: B,
+}
+
+impl<A: LtiFilter, B: LtiFilter> Series<A, B> {
+    pub fn new(first: A, second: B) -> Self {
+        Self { first, second }
+    }
+}
+
+impl<A: LtiFilter, B: LtiFilter> LtiFilter for Series<A, B> {
+    fn frequency_response(&self, omega: f64) -> Complex64 {
+        assert!(omega.is_finite());
+        self.second.frequency_response(omega) * self.first.frequency_response(omega)
     }
 }
 
