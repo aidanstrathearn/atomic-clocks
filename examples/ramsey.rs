@@ -134,9 +134,9 @@ fn feedback_controls(params: &mut Params) -> SliderGrid<'_> {
                         -12.0..=2.0,
                     ),
                     Slider::new(
-                        "Integrator gain (kHz / probability ms)",
+                        "Integrator gain magn. (kHz / probability ms)",
                         integrator_gain,
-                        -1.0..=1.0,
+                        0.0..=5.0,
                     )
                     .step_by(0.001),
                     Slider::new("Feedback delay (ms)", feedback_delay_ms, 0.0..=2.0).step_by(0.001),
@@ -318,8 +318,10 @@ fn feedback_spectra(params: &mut Params) -> Result<FeedbackSpectra, SpectrumErro
     let measurement_noise = FunctionalPsd {
         spectrum: move |_| psd_per_khz_to_per_angular_frequency(measurement_white_psd),
     };
+    let dc_slope = measurement.response_values()[0].re;
+    let signed_gain = params.integrator_gain * dc_slope.signum();
     let controller =
-        Integrator::new(params.integrator_gain).then(Delay::new(params.feedback_delay_ms));
+        Integrator::new(signed_gain).then(Delay::new(params.feedback_delay_ms));
     let feedback = LtiFeedback::new(oscillator_noise, measurement_noise, measurement, controller);
 
     let free_running = feedback.free_running_psd().sample(&grid)?;
@@ -368,7 +370,7 @@ fn feedback_plot(params: &mut Params) -> AppResult {
 
     plot.xlim(
         0.0,
-        0.5 / params.pulse_width_ms,
+        10.0 / params.ramsey_time_ms,
     );
     Ok(plot)
 }

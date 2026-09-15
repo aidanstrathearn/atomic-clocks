@@ -72,7 +72,7 @@ impl<S: Psd, N: Psd, M: LtiFilter, C: LtiFilter> LtiFeedback<S, N, M, C> {
     pub fn injected_measurement_noise_psd(&self) -> FunctionalPsd<impl Fn(f64) -> f64> {
         FunctionalPsd {
             spectrum: |omega| {
-                self.noise.spectrum(omega) //* self.measurement_noise_response_at(omega).norm_sqr()
+                self.noise.spectrum(omega) * self.measurement_noise_response_at(omega).norm_sqr()
             },
         }
     }
