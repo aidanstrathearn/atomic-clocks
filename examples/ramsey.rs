@@ -4,7 +4,7 @@ use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::{Linspace, linspace, past_response_transform};
 use atomic_clocks::signal_processing::{
     AngularFrequencyGrid, Delay, FunctionalPsd, Integrator, LtiFeedback, LtiFilter, Psd,
-    PsdSamples, SpectrumError, TransferFunctionSamples,
+    PsdSamples, Series, SpectrumError, TransferFunctionSamples,
 };
 use atomic_clocks::twolevel::{
     BlochVec, Channel, Hamiltonian, Observable, Process, TimeDependentHamiltonian, TrotterConfig,
@@ -146,6 +146,52 @@ fn feedback_controls(params: &mut Params) -> SliderGrid<'_> {
     )
 }
 
+fn nyquist_controls(params: &mut Params) -> SliderGrid<'_> {
+    let detuning_limit_khz = angular_frequency_to_khz(4.0 / params.pulse_width_ms);
+    let Params {
+        pulse_width_ms,
+        ramsey_time_ms,
+        pulse_area,
+        detuning_khz,
+        time_steps,
+        integrator_gain,
+        feedback_delay_ms,
+        ..
+    } = params;
+    SliderGrid::new(
+        2,
+        [
+            SliderGroup::new(
+                "Ramsey parameters",
+                [
+                    Slider::new("Pulse width (ms)", pulse_width_ms, 0.02..=0.5),
+                    Slider::new("Ramsey time (ms)", ramsey_time_ms, 0.02..=4.0),
+                    Slider::new("Pulse area (rad)", pulse_area, 0.0..=2.0 * PI),
+                    Slider::new(
+                        "Detuning (kHz)",
+                        detuning_khz,
+                        -detuning_limit_khz..=detuning_limit_khz,
+                    ),
+                    Slider::new("Time steps", time_steps, 2..=10_000),
+                ],
+            ),
+            SliderGroup::new(
+                "Feedback parameters",
+                [
+                    Slider::new(
+                        "Integrator gain magn. (kHz / probability ms)",
+                        integrator_gain,
+                        0.0..=5.0,
+                    )
+                    .step_by(0.001),
+                    Slider::new("Feedback delay (ms)", feedback_delay_ms, 0.0..=2.0)
+                        .step_by(0.001),
+                ],
+            ),
+        ],
+    )
+}
+
 fn ramsey(params: &Params, detuning_khz: f64) -> Ramsey {
     Ramsey {
         pulse_area: params.pulse_area,
@@ -267,6 +313,7 @@ fn frequency_response_plot(params: &mut Params) -> AppResult {
     ));
     plot.xlabel("Frequency (kHz)");
     plot.ylabel("Ground probability response magnitude (1 / kHz)");
+    plot.yscale(AxisScale::Log10);
     plot.xlim(0.0, *frequencies_khz.last().unwrap());
     Ok(plot)
 }
@@ -295,6 +342,15 @@ struct FeedbackSpectra {
     total: Vec<f64>,
 }
 
+fn feedback_controller(
+    params: &Params,
+    measurement: &TransferFunctionSamples,
+) -> Series<Integrator, Delay> {
+    let dc_slope = measurement.response_values()[0].re;
+    let signed_gain = params.integrator_gain * dc_slope.signum();
+    Integrator::new(signed_gain).then(Delay::new(params.feedback_delay_ms))
+}
+
 fn feedback_spectra(params: &mut Params) -> Result<FeedbackSpectra, SpectrumError> {
     let measurement = measurement_transfer(params)?;
     let grid = AngularFrequencyGrid::new(measurement.grid().values()[1..].to_vec())?;
@@ -318,10 +374,7 @@ fn feedback_spectra(params: &mut Params) -> Result<FeedbackSpectra, SpectrumErro
     let measurement_noise = FunctionalPsd {
         spectrum: move |_| psd_per_khz_to_per_angular_frequency(measurement_white_psd),
     };
-    let dc_slope = measurement.response_values()[0].re;
-    let signed_gain = params.integrator_gain * dc_slope.signum();
-    let controller =
-        Integrator::new(signed_gain).then(Delay::new(params.feedback_delay_ms));
+    let controller = feedback_controller(params, &measurement);
     let feedback = LtiFeedback::new(oscillator_noise, measurement_noise, measurement, controller);
 
     let free_running = feedback.free_running_psd().sample(&grid)?;
@@ -336,6 +389,55 @@ fn feedback_spectra(params: &mut Params) -> Result<FeedbackSpectra, SpectrumErro
         injected_measurement_noise: density_per_khz(&injected_measurement_noise),
         total: density_per_khz(&total),
     })
+}
+
+fn nyquist_plot(params: &mut Params) -> AppResult {
+    let measurement = measurement_transfer(params)?;
+    let grid = AngularFrequencyGrid::new(measurement.grid().values()[1..].to_vec())?;
+    let controller = feedback_controller(params, &measurement);
+    let unused_signal = FunctionalPsd { spectrum: |_| 0.0 };
+    let unused_measurement_noise = FunctionalPsd { spectrum: |_| 0.0 };
+    let feedback = LtiFeedback::new(
+        unused_signal,
+        unused_measurement_noise,
+        measurement,
+        controller,
+    );
+    let open_loop = feedback.open_loop().sample(&grid)?;
+
+    let positive_real: Vec<_> = open_loop
+        .response_values()
+        .iter()
+        .map(|response| response.re)
+        .collect();
+    let positive_imaginary: Vec<_> = open_loop
+        .response_values()
+        .iter()
+        .map(|response| response.im)
+        .collect();
+    let negative_real: Vec<_> = positive_real.iter().rev().copied().collect();
+    let negative_imaginary: Vec<_> = positive_imaginary
+        .iter()
+        .rev()
+        .map(|imaginary| -imaginary)
+        .collect();
+
+    let mut plot = Plotter::new();
+    plot.plot(&positive_real, &positive_imaginary)
+        .label("Positive frequencies");
+    plot.plot(&negative_real, &negative_imaginary)
+        .label("Negative frequencies");
+    plot.axhline(0.0).label("Im(L) = 0");
+    plot.axvline(-1.0).label("Re(L) = -1");
+    plot.title(format!(
+        "Feedback Nyquist plot at lock point {:.3} kHz",
+        params.detuning_khz
+    ));
+    plot.xlabel("Re(L)");
+    plot.ylabel("Im(L)");
+    plot.xlim(-2.0, 1.0);
+    plot.ylim(-1.5, 1.5);
+    Ok(plot)
 }
 
 fn feedback_plot(params: &mut Params) -> AppResult {
@@ -460,6 +562,7 @@ fn main() -> myplotlib::Result {
         ViewOption::new("Ramsey signal", signal_plot, controls),
         ViewOption::new("Linear response", response_plot, controls),
         ViewOption::new("Frequency response", frequency_response_plot, controls),
+        ViewOption::new("Feedback Nyquist", nyquist_plot, nyquist_controls),
         ViewOption::new("Feedback PSD", feedback_plot, feedback_controls),
     ];
     myplotlib::run_native(AppDefinition::new("Ramsey", "ramsey-canvas", VIEWS))
