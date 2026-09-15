@@ -132,6 +132,10 @@ fn feedback_separates_signal_and_measurement_noise_contributions() {
     let feedback = LtiFeedback::new(signal, noise, Gain::new(2.0), Gain::new(3.0));
     let omega = 1.0;
 
+    assert_eq!(
+        feedback.open_loop().frequency_response(omega),
+        Complex64::new(6.0, 0.0)
+    );
     assert_close(
         feedback.sensitivity().frequency_response(omega).re,
         1.0 / 7.0,

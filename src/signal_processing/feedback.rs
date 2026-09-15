@@ -32,15 +32,23 @@ impl<S: Psd, N: Psd, M: LtiFilter, C: LtiFilter> LtiFeedback<S, N, M, C> {
         }
     }
 
+    fn open_loop_at(&self, omega: f64) -> Complex64 {
+        self.control.frequency_response(omega) * self.measurement.frequency_response(omega)
+    }
+
     fn sensitivity_at(&self, omega: f64) -> Complex64 {
-        Complex64::new(1.0, 0.0)
-            / (Complex64::new(1.0, 0.0)
-                + self.control.frequency_response(omega)
-                    * self.measurement.frequency_response(omega))
+        Complex64::new(1.0, 0.0) / (Complex64::new(1.0, 0.0) + self.open_loop_at(omega))
     }
 
     fn measurement_noise_response_at(&self, omega: f64) -> Complex64 {
         -self.control.frequency_response(omega) * self.sensitivity_at(omega)
+    }
+
+    /// Open-loop response `control * measurement` used by the feedback denominator.
+    pub fn open_loop(&self) -> FunctionalFilter<impl Fn(f64) -> Complex64> {
+        FunctionalFilter {
+            response: |omega| self.open_loop_at(omega),
+        }
     }
 
     /// Closed-loop response from the free-running input disturbance to output.
