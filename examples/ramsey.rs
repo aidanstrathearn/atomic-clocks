@@ -10,7 +10,7 @@ use atomic_clocks::twolevel::{
     BlochVec, Channel, Hamiltonian, Observable, Process, TimeDependentHamiltonian, TrotterConfig,
     Unitary, steps,
 };
-use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
+use myplotlib::{AppDefinition, AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
 const N_DETUNINGS: usize = 500;
 const FREQUENCY_STEP_KHZ: f64 = 0.1 / TAU;
@@ -360,6 +360,7 @@ fn feedback_plot(params: &mut Params) -> AppResult {
     ));
     plot.xlabel("Frequency (kHz)");
     plot.ylabel("Detuning PSD (kHz^2 / kHz)");
+    plot.yscale(AxisScale::Log10);
     // plot.xlim(
     //     spectra.frequencies_khz[0],
     //     *spectra.frequencies_khz.last().unwrap(),
