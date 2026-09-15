@@ -1,11 +1,14 @@
 use std::f64::consts::{PI, TAU};
 
 use atomic_clocks::interferometer::ramsey::Ramsey;
-use atomic_clocks::maths::{linspace, past_response_transform, Linspace};
-use atomic_clocks::signal_processing::TransferFunctionSamples;
+use atomic_clocks::maths::{Linspace, linspace, past_response_transform};
+use atomic_clocks::signal_processing::{
+    AngularFrequencyGrid, Delay, FunctionalPsd, Integrator, LtiFeedback, LtiFilter, Psd,
+    PsdSamples, SpectrumError, TransferFunctionSamples,
+};
 use atomic_clocks::twolevel::{
-    steps, BlochVec, Channel, Hamiltonian, Observable, Process, TimeDependentHamiltonian,
-    TrotterConfig, Unitary,
+    BlochVec, Channel, Hamiltonian, Observable, Process, TimeDependentHamiltonian, TrotterConfig,
+    Unitary, steps,
 };
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
@@ -26,6 +29,11 @@ struct Params {
     pulse_area: f64,
     detuning_khz: f64,
     time_steps: usize,
+    oscillator_white_psd_log10: f64,
+    oscillator_random_walk_log10: f64,
+    measurement_white_psd_log10: f64,
+    integrator_gain: f64,
+    feedback_delay_ms: f64,
 }
 
 impl Params {
@@ -46,6 +54,11 @@ impl Default for Params {
             pulse_area: 0.5 * PI,
             detuning_khz: angular_frequency_to_khz(1.0),
             time_steps: 501,
+            oscillator_white_psd_log10: -4.0,
+            oscillator_random_walk_log10: -6.0,
+            measurement_white_psd_log10: -4.0,
+            integrator_gain: 0.05,
+            feedback_delay_ms: 0.05,
         }
     }
 }
@@ -68,6 +81,68 @@ fn controls(params: &mut Params) -> SliderGrid<'_> {
                 Slider::new("Time steps", &mut params.time_steps, 2..=10_000),
             ],
         )],
+    )
+}
+
+fn feedback_controls(params: &mut Params) -> SliderGrid<'_> {
+    let detuning_limit_khz = angular_frequency_to_khz(4.0 / params.pulse_width_ms);
+    let Params {
+        pulse_width_ms,
+        ramsey_time_ms,
+        pulse_area,
+        detuning_khz,
+        time_steps,
+        oscillator_white_psd_log10,
+        oscillator_random_walk_log10,
+        measurement_white_psd_log10,
+        integrator_gain,
+        feedback_delay_ms,
+    } = params;
+    SliderGrid::new(
+        5,
+        [
+            SliderGroup::new(
+                "Ramsey parameters",
+                [
+                    Slider::new("Pulse width (ms)", pulse_width_ms, 0.02..=0.5),
+                    Slider::new("Ramsey time (ms)", ramsey_time_ms, 0.02..=4.0),
+                    Slider::new("Pulse area (rad)", pulse_area, 0.0..=2.0 * PI),
+                    Slider::new(
+                        "Detuning (kHz)",
+                        detuning_khz,
+                        -detuning_limit_khz..=detuning_limit_khz,
+                    ),
+                    Slider::new("Time steps", time_steps, 2..=10_000),
+                ],
+            ),
+            SliderGroup::new(
+                "Feedback parameters",
+                [
+                    Slider::new(
+                        "log10 oscillator white PSD (kHz^2/kHz)",
+                        oscillator_white_psd_log10,
+                        -12.0..=2.0,
+                    ),
+                    Slider::new(
+                        "log10 oscillator random walk (kHz^3)",
+                        oscillator_random_walk_log10,
+                        -12.0..=2.0,
+                    ),
+                    Slider::new(
+                        "log10 measurement white PSD (probability^2/kHz)",
+                        measurement_white_psd_log10,
+                        -12.0..=2.0,
+                    ),
+                    Slider::new(
+                        "Integrator gain (kHz / probability ms)",
+                        integrator_gain,
+                        -1.0..=1.0,
+                    )
+                    .step_by(0.001),
+                    Slider::new("Feedback delay (ms)", feedback_delay_ms, 0.0..=2.0).step_by(0.001),
+                ],
+            ),
+        ],
     )
 }
 
@@ -143,6 +218,15 @@ fn temporal_response(params: &mut Params) -> (Linspace, Vec<f64>) {
     (relative_times, response)
 }
 
+fn measurement_transfer(params: &mut Params) -> Result<TransferFunctionSamples, SpectrumError> {
+    let (relative_times, response) = temporal_response(params);
+    TransferFunctionSamples::try_from(past_response_transform(
+        &response,
+        relative_times.step,
+        khz_to_angular_frequency(FREQUENCY_STEP_KHZ),
+    ))
+}
+
 fn response_plot(params: &mut Params) -> AppResult {
     let (relative_times, response) = temporal_response(params);
 
@@ -161,12 +245,7 @@ fn response_plot(params: &mut Params) -> AppResult {
 }
 
 fn frequency_response_plot(params: &mut Params) -> AppResult {
-    let (relative_times, response) = temporal_response(params);
-    let transfer = TransferFunctionSamples::try_from(past_response_transform(
-        &response,
-        relative_times.step,
-        khz_to_angular_frequency(FREQUENCY_STEP_KHZ),
-    ))?;
+    let transfer = measurement_transfer(params)?;
     let frequencies_khz: Vec<_> = transfer
         .grid()
         .values()
@@ -188,13 +267,121 @@ fn frequency_response_plot(params: &mut Params) -> AppResult {
     ));
     plot.xlabel("Frequency (kHz)");
     plot.ylabel("Ground probability response magnitude (1 / kHz)");
-    plot.xlim(0.0, angular_frequency_to_khz(PI / relative_times.step));
+    plot.xlim(0.0, *frequencies_khz.last().unwrap());
+    Ok(plot)
+}
+
+fn psd_per_khz_to_per_angular_frequency(value: f64) -> f64 {
+    value / TAU
+}
+
+fn psd_per_angular_frequency_to_per_khz(value: f64) -> f64 {
+    TAU * value
+}
+
+fn density_per_khz(samples: &PsdSamples) -> Vec<f64> {
+    samples
+        .density_values()
+        .iter()
+        .map(|&value| psd_per_angular_frequency_to_per_khz(value))
+        .collect()
+}
+
+struct FeedbackSpectra {
+    frequencies_khz: Vec<f64>,
+    free_running: Vec<f64>,
+    residual_signal: Vec<f64>,
+    injected_measurement_noise: Vec<f64>,
+    total: Vec<f64>,
+}
+
+fn feedback_spectra(params: &mut Params) -> Result<FeedbackSpectra, SpectrumError> {
+    let measurement = measurement_transfer(params)?;
+    let grid = AngularFrequencyGrid::new(measurement.grid().values()[1..].to_vec())?;
+    let frequencies_khz = grid
+        .values()
+        .iter()
+        .map(|&omega| angular_frequency_to_khz(omega))
+        .collect();
+
+    let oscillator_white_psd = 10.0_f64.powf(params.oscillator_white_psd_log10);
+    let oscillator_random_walk = 10.0_f64.powf(params.oscillator_random_walk_log10);
+    let measurement_white_psd = 10.0_f64.powf(params.measurement_white_psd_log10);
+    let oscillator_noise = FunctionalPsd {
+        spectrum: move |omega| {
+            let frequency_khz = angular_frequency_to_khz(omega);
+            psd_per_khz_to_per_angular_frequency(
+                oscillator_white_psd + oscillator_random_walk / frequency_khz.powi(2),
+            )
+        },
+    };
+    let measurement_noise = FunctionalPsd {
+        spectrum: move |_| psd_per_khz_to_per_angular_frequency(measurement_white_psd),
+    };
+    let controller =
+        Integrator::new(params.integrator_gain).then(Delay::new(params.feedback_delay_ms));
+    let feedback = LtiFeedback::new(oscillator_noise, measurement_noise, measurement, controller);
+
+    let free_running = feedback.free_running_psd().sample(&grid)?;
+    let residual_signal = feedback.residual_signal_psd().sample(&grid)?;
+    let injected_measurement_noise = feedback.injected_measurement_noise_psd().sample(&grid)?;
+    let total = feedback.output_psd().sample(&grid)?;
+
+    Ok(FeedbackSpectra {
+        frequencies_khz,
+        free_running: density_per_khz(&free_running),
+        residual_signal: density_per_khz(&residual_signal),
+        injected_measurement_noise: density_per_khz(&injected_measurement_noise),
+        total: density_per_khz(&total),
+    })
+}
+
+fn feedback_plot(params: &mut Params) -> AppResult {
+    let spectra = feedback_spectra(params)?;
+
+    let mut plot = Plotter::new();
+    plot.plot(&spectra.frequencies_khz, &spectra.free_running)
+        .label("Input");
+
+    // plot.plot(&spectra.frequencies_khz, &spectra.residual_signal)
+    //     .label("Residual oscillator noise");
+
+    plot.plot(
+        &spectra.frequencies_khz,
+        &spectra.injected_measurement_noise,
+    )
+    .label("measurement noise");
+
+    plot.plot(&spectra.frequencies_khz, &spectra.total)
+        .label("Output");
+    plot.title(format!(
+        "Feedback PSD at lock point {:.3} kHz",
+        params.detuning_khz
+    ));
+    plot.xlabel("Frequency (kHz)");
+    plot.ylabel("Detuning PSD (kHz^2 / kHz)");
+    // plot.xlim(
+    //     spectra.frequencies_khz[0],
+    //     *spectra.frequencies_khz.last().unwrap(),
+    // );
+
+    plot.xlim(
+        0.0,
+        0.5 / params.pulse_width_ms,
+    );
     Ok(plot)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1.0e-10 * (1.0 + expected.abs()),
+            "actual {actual}, expected {expected}"
+        );
+    }
 
     #[test]
     fn dc_response_matches_detuning_slope() {
@@ -222,6 +409,47 @@ mod tests {
             "DC response {dc_response} did not match detuning slope {finite_difference}"
         );
     }
+
+    #[test]
+    fn psd_frequency_density_conversion_round_trips() {
+        let per_khz = 3.25;
+        assert_close(
+            psd_per_angular_frequency_to_per_khz(psd_per_khz_to_per_angular_frequency(per_khz)),
+            per_khz,
+        );
+    }
+
+    #[test]
+    fn selected_lock_point_sets_the_measurement_response() {
+        let mut params = Params::default();
+        let positive = measurement_transfer(&mut params).unwrap().response_values()[0].re;
+        assert!(params.integrator_gain * positive > 0.0);
+        params.detuning_khz = -params.detuning_khz;
+        let negative = measurement_transfer(&mut params).unwrap().response_values()[0].re;
+
+        assert!(positive * negative < 0.0);
+        assert_close(positive.abs(), negative.abs());
+    }
+
+    #[test]
+    fn default_feedback_spectra_are_finite_and_add_up() {
+        let spectra = feedback_spectra(&mut Params::default()).unwrap();
+        assert!(!spectra.frequencies_khz.is_empty());
+        assert!(spectra.frequencies_khz.iter().all(|value| *value > 0.0));
+        for (((free_running, residual), injected), total) in spectra
+            .free_running
+            .iter()
+            .zip(&spectra.residual_signal)
+            .zip(&spectra.injected_measurement_noise)
+            .zip(&spectra.total)
+        {
+            assert!(free_running.is_finite() && *free_running >= 0.0);
+            assert!(residual.is_finite() && *residual >= 0.0);
+            assert!(injected.is_finite() && *injected >= 0.0);
+            assert!(total.is_finite() && *total >= 0.0);
+            assert_close(*total, residual + injected);
+        }
+    }
 }
 
 fn main() -> myplotlib::Result {
@@ -229,6 +457,7 @@ fn main() -> myplotlib::Result {
         ViewOption::new("Ramsey signal", signal_plot, controls),
         ViewOption::new("Linear response", response_plot, controls),
         ViewOption::new("Frequency response", frequency_response_plot, controls),
+        ViewOption::new("Feedback PSD", feedback_plot, feedback_controls),
     ];
     myplotlib::run_native(AppDefinition::new("Ramsey", "ramsey-canvas", VIEWS))
 }

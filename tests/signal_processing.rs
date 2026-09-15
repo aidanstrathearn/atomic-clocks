@@ -1,7 +1,7 @@
 use atomic_clocks::maths::FourierSpectrum;
 use atomic_clocks::signal_processing::{
-    AngularFrequencyGrid, Delay, FunctionalPsd, Gain, Integrator, LtiFilter, Psd, PsdSamples,
-    SpectrumError, TransferFunctionSamples,
+    AngularFrequencyGrid, Delay, FunctionalPsd, Gain, Integrator, LtiFeedback, LtiFilter, Psd,
+    PsdSamples, SpectrumError, TransferFunctionSamples,
 };
 use rustfft::num_complex::Complex64;
 
@@ -123,4 +123,31 @@ fn primitive_filters_reject_invalid_parameters() {
     for invalid_delay in [-1.0, f64::NAN, f64::INFINITY] {
         assert!(std::panic::catch_unwind(|| Delay::new(invalid_delay)).is_err());
     }
+}
+
+#[test]
+fn feedback_separates_signal_and_measurement_noise_contributions() {
+    let signal = FunctionalPsd { spectrum: |_| 4.0 };
+    let noise = FunctionalPsd { spectrum: |_| 9.0 };
+    let feedback = LtiFeedback::new(signal, noise, Gain::new(2.0), Gain::new(3.0));
+    let omega = 1.0;
+
+    assert_close(
+        feedback.sensitivity().frequency_response(omega).re,
+        1.0 / 7.0,
+    );
+    assert_close(
+        feedback
+            .measurement_noise_response()
+            .frequency_response(omega)
+            .re,
+        -3.0 / 7.0,
+    );
+    assert_close(feedback.free_running_psd().spectrum(omega), 4.0);
+    assert_close(feedback.residual_signal_psd().spectrum(omega), 4.0 / 49.0);
+    assert_close(
+        feedback.injected_measurement_noise_psd().spectrum(omega),
+        81.0 / 49.0,
+    );
+    assert_close(feedback.output_psd().spectrum(omega), 85.0 / 49.0);
 }
