@@ -226,4 +226,24 @@ fn feedback_separates_signal_and_measurement_noise_contributions() {
         81.0 / 49.0,
     );
     assert_close(feedback.output_psd().spectrum(omega), 85.0 / 49.0);
+
+    let grid = AngularFrequencyGrid::new(vec![omega, 2.0]).unwrap();
+    let samples = feedback.sample_psds(&grid).unwrap();
+    assert_eq!(samples.output().grid(), &grid);
+    for index in 0..grid.values().len() {
+        assert_close(samples.free_running().density_values()[index], 4.0);
+        assert_close(
+            samples.residual_signal().density_values()[index],
+            4.0 / 49.0,
+        );
+        assert_close(
+            samples.injected_measurement_noise().density_values()[index],
+            81.0 / 49.0,
+        );
+        assert_eq!(
+            samples.output().density_values()[index],
+            samples.residual_signal().density_values()[index]
+                + samples.injected_measurement_noise().density_values()[index]
+        );
+    }
 }

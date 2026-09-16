@@ -1,8 +1,36 @@
 use rustfft::num_complex::Complex64;
 
-use super::psd::FunctionalPsd;
-use super::psd::Psd;
+use super::error::SpectrumError;
+use super::frequency::AngularFrequencyGrid;
+use super::psd::{FunctionalPsd, Psd, PsdSamples};
 use super::transfer::{FunctionalFilter, LtiFilter};
+
+/// Sampled decomposition of the disturbances in a scalar feedback loop.
+#[derive(Clone, Debug)]
+pub struct FeedbackPsdSamples {
+    free_running: PsdSamples,
+    residual_signal: PsdSamples,
+    injected_measurement_noise: PsdSamples,
+    output: PsdSamples,
+}
+
+impl FeedbackPsdSamples {
+    pub fn free_running(&self) -> &PsdSamples {
+        &self.free_running
+    }
+
+    pub fn residual_signal(&self) -> &PsdSamples {
+        &self.residual_signal
+    }
+
+    pub fn injected_measurement_noise(&self) -> &PsdSamples {
+        &self.injected_measurement_noise
+    }
+
+    pub fn output(&self) -> &PsdSamples {
+        &self.output
+    }
+}
 
 /// Scalar negative feedback with independent input and measurement noise.
 ///
@@ -93,5 +121,42 @@ impl<S: Psd, N: Psd, M: LtiFilter, C: LtiFilter> LtiFeedback<S, N, M, C> {
                         * self.measurement_noise_response_at(omega).norm_sqr()
             },
         }
+    }
+
+    /// Samples every component of the feedback PSD decomposition on one grid.
+    /// Each input spectrum and transfer function is evaluated once per frequency.
+    pub fn sample_psds(
+        &self,
+        grid: &AngularFrequencyGrid,
+    ) -> Result<FeedbackPsdSamples, SpectrumError> {
+        grid.require_nonnegative()?;
+        let mut free_running = Vec::with_capacity(grid.values().len());
+        let mut residual_signal = Vec::with_capacity(grid.values().len());
+        let mut injected_measurement_noise = Vec::with_capacity(grid.values().len());
+        let mut output = Vec::with_capacity(grid.values().len());
+
+        for &omega in grid.values() {
+            let signal = self.signal.spectrum(omega);
+            let noise = self.noise.spectrum(omega);
+            let control = self.control.frequency_response(omega);
+            let measurement = self.measurement.frequency_response(omega);
+            let sensitivity =
+                Complex64::new(1.0, 0.0) / (Complex64::new(1.0, 0.0) + control * measurement);
+            let measurement_noise_response = -control * sensitivity;
+            let residual = signal * sensitivity.norm_sqr();
+            let injected = noise * measurement_noise_response.norm_sqr();
+
+            free_running.push(signal);
+            residual_signal.push(residual);
+            injected_measurement_noise.push(injected);
+            output.push(residual + injected);
+        }
+
+        Ok(FeedbackPsdSamples {
+            free_running: PsdSamples::new(grid.clone(), free_running)?,
+            residual_signal: PsdSamples::new(grid.clone(), residual_signal)?,
+            injected_measurement_noise: PsdSamples::new(grid.clone(), injected_measurement_noise)?,
+            output: PsdSamples::new(grid.clone(), output)?,
+        })
     }
 }

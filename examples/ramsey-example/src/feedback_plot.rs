@@ -16,15 +16,15 @@ fn density_per_khz(samples: &PsdSamples) -> Vec<f64> {
 pub(crate) fn plot(params: &mut RamseyParameters) -> AppResult {
     let spectra = spectra(params)?;
     let frequencies_khz: Vec<_> = spectra
-        .total
+        .output()
         .grid()
         .values()
         .iter()
         .map(|&omega| angular_frequency_to_khz(omega))
         .collect();
-    let free_running = density_per_khz(&spectra.free_running);
-    let injected_measurement_noise = density_per_khz(&spectra.injected_measurement_noise);
-    let total = density_per_khz(&spectra.total);
+    let free_running = density_per_khz(spectra.free_running());
+    let injected_measurement_noise = density_per_khz(spectra.injected_measurement_noise());
+    let total = density_per_khz(spectra.output());
 
     let mut plot = Plotter::new();
     plot.plot(&frequencies_khz, &free_running).label("Input");
