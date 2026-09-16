@@ -36,13 +36,7 @@ impl Default for Params {
 }
 
 fn controls(params: &mut Params) -> SliderGrid<'_> {
-    let velocity = SliderGroup::new(
-        "Uniform velocity distribution",
-        [
-            Slider::new("Doppler half-width", &mut params.kv_half_width, 0.0..=20.0),
-            Slider::new("Velocity samples", &mut params.kv_samples, 1..=201),
-        ],
-    );
+    let velocity = velocity_control_group(&mut params.kv_half_width, &mut params.kv_samples);
     SliderGrid::new(
         5,
         mts::control_groups(&mut params.mts, "Mean Doppler shift (kv)")
@@ -51,7 +45,20 @@ fn controls(params: &mut Params) -> SliderGrid<'_> {
     )
 }
 
-fn velocity_average(params: &Params) -> Result<MtsCurves, String> {
+fn velocity_control_group<'a>(
+    kv_half_width: &'a mut f64,
+    kv_samples: &'a mut usize,
+) -> SliderGroup<'a> {
+    SliderGroup::new(
+        "Uniform velocity distribution",
+        [
+            Slider::new("Doppler half-width", kv_half_width, 0.0..=20.0),
+            Slider::new("Velocity samples", kv_samples, 1..=201),
+        ],
+    )
+}
+
+fn velocity_samples(params: &Params) -> Result<Vec<f64>, String> {
     if params.kv_samples == 0 {
         return Err("velocity sample count must be positive".to_string());
     }
@@ -59,6 +66,22 @@ fn velocity_average(params: &Params) -> Result<MtsCurves, String> {
         return Err("Doppler half-width must be non-negative and finite".to_string());
     }
 
+    if params.kv_half_width == 0.0 || params.kv_samples == 1 {
+        return Ok(vec![params.mts.hamiltonian.kv]);
+    }
+
+    // Midpoints of equal bins for a uniform distribution on kv +/- half-width.
+    Ok((0..params.kv_samples)
+        .map(|index| {
+            params.mts.hamiltonian.kv
+                + (2.0 * (index as f64 + 0.5) / params.kv_samples as f64 - 1.0)
+                    * params.kv_half_width
+        })
+        .collect())
+}
+
+fn velocity_average(params: &Params) -> Result<MtsCurves, String> {
+    let velocities = velocity_samples(params)?;
     let probe = MtsParams {
         hamiltonian: HamiltonianParams {
             frame: Frame::Probe,
@@ -66,21 +89,18 @@ fn velocity_average(params: &Params) -> Result<MtsCurves, String> {
         },
         ..params.mts
     };
-    if params.kv_half_width == 0.0 || params.kv_samples == 1 {
+    if velocities.len() == 1 {
         return compute_demod(&probe, Vec3::from_angles(FRAC_PI_2, FRAC_PI_2)).map(MtsCurves::from);
     }
 
-    // Equal-weight midpoint quadrature for a uniform distribution on kv +/- half-width.
     // Collect in sample order so summation is independent of Rayon scheduling.
-    let outputs: Result<Vec<_>, String> = (0..params.kv_samples)
+    let outputs: Result<Vec<_>, String> = velocities
         .into_par_iter()
-        .map(|index| {
-            let offset = (2.0 * (index as f64 + 0.5) / params.kv_samples as f64 - 1.0)
-                * params.kv_half_width;
+        .map(|kv| {
             compute_demod(
                 &MtsParams {
                     hamiltonian: HamiltonianParams {
-                        kv: probe.hamiltonian.kv + offset,
+                        kv,
                         ..probe.hamiltonian
                     },
                     ..probe
@@ -107,19 +127,6 @@ fn velocity_average(params: &Params) -> Result<MtsCurves, String> {
             for (sum, value) in sum.iter_mut().zip(values) {
                 *sum += value;
             }
-        }
-    }
-    for values in [
-        &mut average.amp0,
-        &mut average.proj0,
-        &mut average.amp1,
-        &mut average.proj1,
-        &mut average.proj2,
-        &mut average.proj3,
-    ] {
-        for value in values {
-            //*value /= params.kv_samples as f64;
-            *value /= 1.0;
         }
     }
     Ok(average)
@@ -173,6 +180,7 @@ fn response_control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_>
             ),
         ]),
     );
+    let velocity = velocity_control_group(&mut params.kv_half_width, &mut params.kv_samples);
     SliderGrid::new(
         5,
         mts::atom_control_groups(
@@ -181,13 +189,14 @@ fn response_control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_>
             "Mean Doppler shift (kv)",
         )
         .into_iter()
-        .chain([response]),
+        .chain([response, velocity]),
     )
 }
 
-fn response_output(params: &Params) -> Result<LinearResponseOutput, String> {
+fn response_at_velocity(params: &Params, kv: f64) -> Result<LinearResponseOutput, String> {
     let atom = HamiltonianParams {
         frame: Frame::Probe,
+        kv,
         ..params.mts.hamiltonian
     };
     let solver = LinearResponseSolverParams {
@@ -208,6 +217,61 @@ fn response_output(params: &Params) -> Result<LinearResponseOutput, String> {
     )
 }
 
+fn add_response(
+    sum: &mut LinearResponseOutput,
+    output: LinearResponseOutput,
+) -> Result<(), String> {
+    if sum.times != output.times || sum.delays != output.delays {
+        return Err("velocity response grids do not match".to_string());
+    }
+    if sum.response.len() != output.response.len() {
+        return Err("velocity response dimensions do not match".to_string());
+    }
+    for (sum_row, row) in sum.response.iter_mut().zip(output.response) {
+        if sum_row.len() != row.len() {
+            return Err("velocity response dimensions do not match".to_string());
+        }
+        for (sum, value) in sum_row.iter_mut().zip(row) {
+            *sum += value;
+        }
+    }
+    Ok(())
+}
+
+fn response_output(params: &Params) -> Result<LinearResponseOutput, String> {
+    let velocities = velocity_samples(params)?;
+    if velocities.len() == 1 {
+        return response_at_velocity(params, velocities[0]);
+    }
+
+    // Bound retained matrices by the worker count, and retain a fixed sample/chunk
+    // order so floating-point sums do not depend on scheduling. As in the probe
+    // view, equal-weight sample contributions are summed without normalization.
+    let chunk_count = rayon::current_num_threads().min(velocities.len());
+    let chunk_size = velocities.len().div_ceil(chunk_count);
+    let partials: Result<Vec<_>, String> = velocities
+        .par_chunks(chunk_size)
+        .map(|chunk| {
+            let mut chunk = chunk.iter().copied();
+            let mut sum =
+                response_at_velocity(params, chunk.next().expect("velocity chunks are non-empty"))?;
+            for kv in chunk {
+                add_response(&mut sum, response_at_velocity(params, kv)?)?;
+            }
+            Ok(sum)
+        })
+        .collect();
+
+    let mut partials = partials?.into_iter();
+    let mut sum = partials
+        .next()
+        .expect("a positive velocity sample count produces a response");
+    for partial in partials {
+        add_response(&mut sum, partial)?;
+    }
+    Ok(sum)
+}
+
 fn response_plot(params: &mut Params) -> AppResult {
     let output = response_output(params)?;
     let atom = &params.mts.hamiltonian;
@@ -222,8 +286,13 @@ fn response_plot(params: &mut Params) -> AppResult {
     plot.plot(&output.delays, &output.response[index])
         .label("C(t, t - τ)");
     plot.title(format!(
-        "Probe-frame response: t/T = {:.3}, t = {:.3}, detuning = {:.3}, kv = {:.3}",
-        params.response_time_fraction, output.times[index], atom.delta, atom.kv,
+        "Probe-frame response: t/T = {:.3}, t = {:.3}, detuning = {:.3}, kv = {:.3} ± {:.3} ({} samples)",
+        params.response_time_fraction,
+        output.times[index],
+        atom.delta,
+        atom.kv,
+        params.kv_half_width,
+        params.kv_samples,
     ));
     plot.xlabel("Delay τ (time)");
     plot.ylabel("C(t, t - τ): σy response to σz / 2");
@@ -268,8 +337,8 @@ fn demodulated_response_plot(params: &mut Params) -> AppResult {
     plot.plot(&output.delays, &third_harmonic)
         .label("Third harmonic (in phase)");
     plot.title(format!(
-        "Demodulated probe-frame response: detuning = {:.3}, kv = {:.3}",
-        atom.delta, atom.kv,
+        "Demodulated probe-frame response: detuning = {:.3}, kv = {:.3} ± {:.3} ({} samples)",
+        atom.delta, atom.kv, params.kv_half_width, params.kv_samples,
     ));
     plot.xlabel("Delay τ (time)");
     plot.ylabel("Demodulated σy response to σz / 2");
@@ -308,8 +377,8 @@ fn frequency_response_plot(params: &mut Params) -> AppResult {
             .label(label);
     }
     plot.title(format!(
-        "Demodulated frequency response: detuning = {:.3}, kv = {:.3}",
-        atom.delta, atom.kv,
+        "Demodulated frequency response: detuning = {:.3}, kv = {:.3} ± {:.3} ({} samples)",
+        atom.delta, atom.kv, params.kv_half_width, params.kv_samples,
     ));
     plot.xlabel("Angular frequency (rad / time)");
     plot.ylabel("Fourier magnitude of demodulated response");
@@ -500,6 +569,33 @@ mod tests {
     }
 
     #[test]
+    fn velocity_sum_matches_serial_response_kernels() {
+        let params = Params {
+            response_warmup_periods: 1,
+            response_delay_periods: 1,
+            ..small_params()
+        };
+        let sum = response_output(&params).unwrap();
+        // Midpoints of the three equal bins in [-0.75, 2.25].
+        let reference: Vec<_> = [-0.25, 0.75, 1.75]
+            .into_iter()
+            .map(|kv| response_at_velocity(&params, kv).unwrap())
+            .collect();
+
+        assert_eq!(sum.times, reference[0].times);
+        assert_eq!(sum.delays, reference[0].delays);
+        for (i, row) in sum.response.iter().enumerate() {
+            for (j, &value) in row.iter().enumerate() {
+                let expected = reference
+                    .iter()
+                    .map(|output| output.response[i][j])
+                    .sum::<f64>();
+                assert!((value - expected).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
     fn zero_width_and_single_sample_recover_the_central_probe_scan() {
         for (kv_half_width, kv_samples) in [(0.0, 21), (5.0, 1)] {
             let params = Params {
@@ -522,6 +618,24 @@ mod tests {
             .unwrap();
             assert_eq!(average.hz, reference.hz);
             assert_eq!(curves(&average), curves(&reference));
+        }
+    }
+
+    #[test]
+    fn zero_width_and_single_sample_recover_the_central_response() {
+        for (kv_half_width, kv_samples) in [(0.0, 21), (5.0, 1)] {
+            let params = Params {
+                kv_half_width,
+                kv_samples,
+                response_warmup_periods: 1,
+                response_delay_periods: 1,
+                ..small_params()
+            };
+            let sum = response_output(&params).unwrap();
+            let reference = response_at_velocity(&params, params.mts.hamiltonian.kv).unwrap();
+            assert_eq!(sum.times, reference.times);
+            assert_eq!(sum.delays, reference.delays);
+            assert_eq!(sum.response, reference.response);
         }
     }
 
