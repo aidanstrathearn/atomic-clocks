@@ -3,16 +3,19 @@ use std::f64::consts::{PI, TAU};
 use atomic_clocks::interferometer::ramsey::Ramsey;
 use atomic_clocks::maths::{Linspace, linspace, past_response_transform};
 use atomic_clocks::signal_processing::{
-    AngularFrequencyGrid, Delay, FunctionalPsd, Integrator, LtiFeedback, LtiFilter, Psd,
-    PsdSamples, Series, SpectrumError, TransferFunctionSamples,
+    AdevSamples, AngularFrequencyGrid, Delay, FunctionalPsd, Integrator, LtiFeedback, LtiFilter,
+    Psd, PsdSamples, Series, SpectrumError, TransferFunctionSamples,
 };
 use atomic_clocks::twolevel::{
     BlochVec, Channel, Hamiltonian, Observable, Process, TimeDependentHamiltonian, TrotterConfig,
     Unitary, steps,
 };
-use myplotlib::{AppDefinition, AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
+use myplotlib::{
+    AppDefinition, AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup, ViewOption,
+};
 
 const N_DETUNINGS: usize = 500;
+const N_AVERAGING_TIMES: usize = 200;
 const FREQUENCY_STEP_KHZ: f64 = 0.1 / TAU;
 
 fn khz_to_angular_frequency(frequency_khz: f64) -> f64 {
@@ -368,6 +371,14 @@ struct FeedbackSpectra {
     total: Vec<f64>,
 }
 
+struct FeedbackPsdSamples {
+    frequencies_khz: Vec<f64>,
+    free_running: PsdSamples,
+    residual_signal: PsdSamples,
+    injected_measurement_noise: PsdSamples,
+    total: PsdSamples,
+}
+
 fn feedback_controller(
     params: &Params,
     measurement: &TransferFunctionSamples,
@@ -377,7 +388,7 @@ fn feedback_controller(
     Integrator::new(signed_gain).then(Delay::new(params.feedback_delay_ms))
 }
 
-fn feedback_spectra(params: &mut Params) -> Result<FeedbackSpectra, SpectrumError> {
+fn feedback_psd_samples(params: &mut Params) -> Result<FeedbackPsdSamples, SpectrumError> {
     let measurement = measurement_transfer(params)?;
     let grid = AngularFrequencyGrid::new(measurement.grid().values()[1..].to_vec())?;
     let frequencies_khz = grid
@@ -408,12 +419,57 @@ fn feedback_spectra(params: &mut Params) -> Result<FeedbackSpectra, SpectrumErro
     let injected_measurement_noise = feedback.injected_measurement_noise_psd().sample(&grid)?;
     let total = feedback.output_psd().sample(&grid)?;
 
-    Ok(FeedbackSpectra {
+    Ok(FeedbackPsdSamples {
         frequencies_khz,
-        free_running: density_per_khz(&free_running),
-        residual_signal: density_per_khz(&residual_signal),
-        injected_measurement_noise: density_per_khz(&injected_measurement_noise),
-        total: density_per_khz(&total),
+        free_running,
+        residual_signal,
+        injected_measurement_noise,
+        total,
+    })
+}
+
+fn feedback_spectra(params: &mut Params) -> Result<FeedbackSpectra, SpectrumError> {
+    let samples = feedback_psd_samples(params)?;
+    Ok(FeedbackSpectra {
+        frequencies_khz: samples.frequencies_khz,
+        free_running: density_per_khz(&samples.free_running),
+        residual_signal: density_per_khz(&samples.residual_signal),
+        injected_measurement_noise: density_per_khz(&samples.injected_measurement_noise),
+        total: density_per_khz(&samples.total),
+    })
+}
+
+struct FeedbackAdev {
+    free_running: AdevSamples,
+    total: AdevSamples,
+}
+
+fn logarithmic_grid(start: f64, stop: f64, points: usize) -> Vec<f64> {
+    assert!(start.is_finite() && start > 0.0);
+    assert!(stop.is_finite() && stop > start);
+    assert!(points >= 2);
+    linspace(start.ln(), stop.ln(), points - 1)
+        .into_iter()
+        .map(f64::exp)
+        .collect()
+}
+
+fn feedback_adev(params: &mut Params) -> Result<FeedbackAdev, SpectrumError> {
+    let samples = feedback_psd_samples(params)?;
+    let angular_frequencies = samples.total.grid().values();
+    let minimum_angular_frequency = angular_frequencies[0];
+    let maximum_angular_frequency = *angular_frequencies.last().unwrap();
+    // Keep the useful part of the Allan-variance kernel inside the sampled band.
+    let averaging_times = logarithmic_grid(
+        TAU / maximum_angular_frequency,
+        1.0 / minimum_angular_frequency,
+        N_AVERAGING_TIMES,
+    );
+    let free_running = samples.free_running.to_adev(&averaging_times)?;
+    let total = samples.total.to_adev(&averaging_times)?;
+    Ok(FeedbackAdev {
+        free_running,
+        total,
     })
 }
 
@@ -503,6 +559,28 @@ fn feedback_plot(params: &mut Params) -> AppResult {
     Ok(plot)
 }
 
+fn adev_plot(params: &mut Params) -> AppResult {
+    let adev = feedback_adev(params)?;
+
+    let mut plot = Plotter::new();
+    plot.plot(
+        adev.free_running.averaging_times(),
+        adev.free_running.deviation_values(),
+    )
+    .label("Free-running oscillator");
+    plot.plot(adev.total.averaging_times(), adev.total.deviation_values())
+        .label("Locked oscillator");
+    plot.title(format!(
+        "Allan deviation at lock point {:.3} kHz",
+        params.detuning_khz
+    ));
+    plot.xlabel("Averaging time (ms)");
+    plot.ylabel("Detuning Allan deviation (kHz)");
+    plot.xscale(AxisScale::Log10);
+    plot.yscale(AxisScale::Log10);
+    Ok(plot)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,6 +659,23 @@ mod tests {
             assert_close(*total, residual + injected);
         }
     }
+
+    #[test]
+    fn default_feedback_adev_is_finite() {
+        let adev = feedback_adev(&mut Params::default()).unwrap();
+        assert_eq!(
+            adev.free_running.averaging_times(),
+            adev.total.averaging_times()
+        );
+        assert_eq!(adev.free_running.averaging_times().len(), N_AVERAGING_TIMES);
+        assert!(
+            adev.free_running
+                .deviation_values()
+                .iter()
+                .chain(adev.total.deviation_values())
+                .all(|value| value.is_finite() && *value > 0.0)
+        );
+    }
 }
 
 fn main() -> myplotlib::Result {
@@ -590,6 +685,7 @@ fn main() -> myplotlib::Result {
         ViewOption::new("Frequency response", frequency_response_plot, controls),
         ViewOption::new("Feedback Nyquist", nyquist_plot, nyquist_controls),
         ViewOption::new("Feedback PSD", feedback_plot, feedback_controls),
+        ViewOption::new("Allan deviation", adev_plot, feedback_controls),
     ];
     myplotlib::run_native(AppDefinition::new("Ramsey", "ramsey-canvas", VIEWS))
 }

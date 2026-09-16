@@ -3,6 +3,7 @@ use std::{error::Error, fmt};
 #[derive(Clone, Debug, PartialEq)]
 pub enum SpectrumError {
     EmptyFrequencyGrid,
+    EmptyAveragingTimeGrid,
     LengthMismatch {
         frequencies: usize,
         values: usize,
@@ -10,7 +11,16 @@ pub enum SpectrumError {
     NonFiniteFrequency {
         index: usize,
     },
+    NonFiniteAveragingTime {
+        index: usize,
+    },
+    NonPositiveAveragingTime {
+        index: usize,
+    },
     FrequenciesNotStrictlyIncreasing {
+        lower_index: usize,
+    },
+    AveragingTimesNotStrictlyIncreasing {
         lower_index: usize,
     },
     NegativePsdFrequency {
@@ -20,6 +30,9 @@ pub enum SpectrumError {
         index: usize,
     },
     InvalidPsdValue {
+        index: usize,
+    },
+    InvalidAdevValue {
         index: usize,
     },
     NonFiniteQuery,
@@ -34,6 +47,9 @@ impl fmt::Display for SpectrumError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyFrequencyGrid => write!(formatter, "frequency grid must not be empty"),
+            Self::EmptyAveragingTimeGrid => {
+                write!(formatter, "averaging-time grid must not be empty")
+            }
             Self::LengthMismatch {
                 frequencies,
                 values,
@@ -44,9 +60,23 @@ impl fmt::Display for SpectrumError {
             Self::NonFiniteFrequency { index } => {
                 write!(formatter, "frequency at index {index} is not finite")
             }
+            Self::NonFiniteAveragingTime { index } => {
+                write!(formatter, "averaging time at index {index} is not finite")
+            }
+            Self::NonPositiveAveragingTime { index } => {
+                write!(
+                    formatter,
+                    "averaging time at index {index} must be positive"
+                )
+            }
             Self::FrequenciesNotStrictlyIncreasing { lower_index } => write!(
                 formatter,
                 "frequencies at indices {lower_index} and {} are not strictly increasing",
+                lower_index + 1
+            ),
+            Self::AveragingTimesNotStrictlyIncreasing { lower_index } => write!(
+                formatter,
+                "averaging times at indices {lower_index} and {} are not strictly increasing",
                 lower_index + 1
             ),
             Self::NegativePsdFrequency { index } => {
@@ -61,6 +91,10 @@ impl fmt::Display for SpectrumError {
             Self::InvalidPsdValue { index } => write!(
                 formatter,
                 "PSD value at index {index} must be finite and nonnegative"
+            ),
+            Self::InvalidAdevValue { index } => write!(
+                formatter,
+                "Allan deviation at index {index} must be finite and nonnegative"
             ),
             Self::NonFiniteQuery => write!(formatter, "query frequency must be finite"),
             Self::FrequencyOutsideRange {

@@ -1,7 +1,7 @@
 use atomic_clocks::maths::FourierSpectrum;
 use atomic_clocks::signal_processing::{
-    AngularFrequencyGrid, Delay, FunctionalPsd, Gain, Integrator, LtiFeedback, LtiFilter, Psd,
-    PsdSamples, SpectrumError, TransferFunctionSamples,
+    AdevSamples, AngularFrequencyGrid, Delay, FunctionalPsd, Gain, Integrator, LtiFeedback,
+    LtiFilter, Psd, PsdSamples, SpectrumError, TransferFunctionSamples, WhiteRw,
 };
 use rustfft::num_complex::Complex64;
 
@@ -88,6 +88,78 @@ fn sampled_types_validate_grid_compatibility() {
         PsdSamples::new(negative_grid, vec![1.0, 1.0]).unwrap_err(),
         SpectrumError::NegativePsdFrequency { index: 0 }
     );
+}
+
+#[test]
+fn adev_samples_reject_invalid_data() {
+    assert_eq!(
+        AdevSamples::new(vec![], vec![]).unwrap_err(),
+        SpectrumError::EmptyAveragingTimeGrid
+    );
+    assert_eq!(
+        AdevSamples::new(vec![1.0, f64::NAN], vec![1.0, 1.0]).unwrap_err(),
+        SpectrumError::NonFiniteAveragingTime { index: 1 }
+    );
+    assert_eq!(
+        AdevSamples::new(vec![0.0, 1.0], vec![1.0, 1.0]).unwrap_err(),
+        SpectrumError::NonPositiveAveragingTime { index: 0 }
+    );
+    assert_eq!(
+        AdevSamples::new(vec![1.0, 1.0], vec![1.0, 1.0]).unwrap_err(),
+        SpectrumError::AveragingTimesNotStrictlyIncreasing { lower_index: 0 }
+    );
+    assert_eq!(
+        AdevSamples::new(vec![1.0], vec![-1.0]).unwrap_err(),
+        SpectrumError::InvalidAdevValue { index: 0 }
+    );
+}
+
+#[test]
+fn sampled_psd_converts_to_adev_on_a_nonuniform_grid_containing_zero() {
+    let grid = AngularFrequencyGrid::new(vec![0.0, 0.5, 2.0]).unwrap();
+    let psd = PsdSamples::new(grid, vec![1.0, 1.0, 1.0]).unwrap();
+    let averaging_time = 2.0 * std::f64::consts::PI;
+    let adev = psd.to_adev(&[averaging_time]).unwrap();
+
+    assert_eq!(adev.averaging_times(), &[averaging_time]);
+    assert_close(
+        adev.deviation_values()[0],
+        8.0_f64.sqrt() / std::f64::consts::PI,
+    );
+}
+
+#[test]
+fn white_random_walk_psd_matches_analytic_adev() {
+    let points = 50_001;
+    let log_min = 1.0e-5_f64.ln();
+    let log_max = 1.0e4_f64.ln();
+    let frequencies = (0..points)
+        .map(|index| {
+            let fraction = index as f64 / (points - 1) as f64;
+            (log_min + fraction * (log_max - log_min)).exp()
+        })
+        .collect();
+    let grid = AngularFrequencyGrid::new(frequencies).unwrap();
+    let white_noise = 0.7;
+    let random_walk = 0.2;
+    let psd = WhiteRw {
+        white_noise,
+        random_walk,
+    }
+    .sample(&grid)
+    .unwrap();
+    let averaging_times = [0.3, 1.0, 3.0];
+    let adev = psd.to_adev(&averaging_times).unwrap();
+
+    for (&averaging_time, &actual) in averaging_times.iter().zip(adev.deviation_values()) {
+        let expected = (std::f64::consts::PI * white_noise / averaging_time
+            + std::f64::consts::PI * random_walk * averaging_time / 3.0)
+            .sqrt();
+        assert!(
+            (actual - expected).abs() < 2.0e-3 * expected,
+            "actual {actual}, expected {expected} at averaging time {averaging_time}"
+        );
+    }
 }
 
 #[test]

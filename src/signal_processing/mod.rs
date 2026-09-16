@@ -1,11 +1,13 @@
 //! Scalar LTI transfer functions and one-sided power spectral densities.
 
+mod adev;
 mod error;
 mod feedback;
 mod frequency;
 mod psd;
 mod transfer;
 
+pub use adev::AdevSamples;
 pub use error::SpectrumError;
 pub use feedback::LtiFeedback;
 pub use frequency::AngularFrequencyGrid;
