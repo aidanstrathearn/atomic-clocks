@@ -1371,6 +1371,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mts-examples"
+version = "0.1.0"
+dependencies = [
+ "atomic-clocks",
+ "myplotlib",
+ "rayon",
+]
+
+[[package]]
 name = "myplotlib"
 version = "0.1.0"
 source = "git+https://github.com/aidanstrathearn/myplotlib.git#ab0d217a6bb84fa84e25ec48ff7ea8aceaf26248"

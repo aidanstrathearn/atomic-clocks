@@ -1,0 +1,10 @@
+[package]
+name = "mts-examples"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+atomic-clocks = { path = "../.." }
+myplotlib = { git = "https://github.com/aidanstrathearn/myplotlib.git" }
+rayon = "1"
