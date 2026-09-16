@@ -1,4 +1,4 @@
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 
 use crate::params::RamseyParameters;
 use atomic_clocks::interferometer::{
@@ -22,7 +22,7 @@ fn solver(params: &RamseyParameters, detuning_khz: f64) -> Result<RamseySolver, 
         detuning: khz_to_angular_frequency(detuning_khz),
         pulse_width: params.pulse_width_ms,
         pulse_separation: params.ramsey_time_ms,
-        phase_diff: 0.0,
+        phase_diff: PI / 2.0,
     }
     .solver(RamseySolverConfig {
         pulse_tail_widths: 4.0,

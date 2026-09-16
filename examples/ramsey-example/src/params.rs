@@ -19,7 +19,7 @@ impl Default for RamseyParameters {
             pulse_width_ms: 0.05,
             ramsey_time_ms: 2.0,
             pulse_area: 0.5 * PI,
-            detuning_khz: 1.0 / TAU,
+            detuning_khz: 0.0 / TAU,
             time_steps: 501,
             oscillator_white_psd_log10: -4.0,
             oscillator_random_walk_log10: -6.0,
