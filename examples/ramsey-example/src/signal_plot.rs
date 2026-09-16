@@ -1,16 +1,13 @@
 use crate::params::RamseyParameters;
-use crate::ramsey::{angular_frequency_to_khz, signal};
+use crate::ramsey::{detuning_limit_khz, signal};
 use atomic_clocks::maths::linspace;
 use myplotlib::{AppResult, Plotter};
 
-const N_DETUNINGS: usize = 500;
+const N_DETUNINGS: usize = 501;
 
 pub(crate) fn plot(params: &mut RamseyParameters) -> AppResult {
-    let detuning_limit_khz = angular_frequency_to_khz(4.0 / params.pulse_width_ms);
-    params.detuning_khz = params
-        .detuning_khz
-        .clamp(-detuning_limit_khz, detuning_limit_khz);
-    let detunings_khz = linspace(-detuning_limit_khz, detuning_limit_khz, N_DETUNINGS - 1);
+    let detuning_limit = detuning_limit_khz(params.pulse_width_ms);
+    let detunings_khz = linspace(-detuning_limit, detuning_limit, N_DETUNINGS - 1);
     let signal = signal(params, &detunings_khz)?;
 
     let mut plot = Plotter::new();
@@ -21,6 +18,6 @@ pub(crate) fn plot(params: &mut RamseyParameters) -> AppResult {
     plot.title("Ramsey signal");
     plot.xlabel("Detuning (kHz)");
     plot.ylabel("Final ground-state probability");
-    plot.xlim(-detuning_limit_khz, detuning_limit_khz);
+    plot.xlim(-detuning_limit, detuning_limit);
     Ok(plot)
 }

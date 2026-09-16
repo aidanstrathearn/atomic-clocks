@@ -7,6 +7,8 @@ use atomic_clocks::interferometer::{
 use atomic_clocks::signal_processing::TransferFunctionSamples;
 
 const MAX_ANGULAR_FREQUENCY_STEP: f64 = 0.05;
+pub(crate) const DETUNING_STEP_KHZ: f64 = 0.01;
+const DETUNING_RANGE_FACTOR: f64 = 3.0;
 
 pub(crate) fn khz_to_angular_frequency(frequency_khz: f64) -> f64 {
     TAU * frequency_khz
@@ -14,6 +16,15 @@ pub(crate) fn khz_to_angular_frequency(frequency_khz: f64) -> f64 {
 
 pub(crate) fn angular_frequency_to_khz(angular_frequency: f64) -> f64 {
     angular_frequency / TAU
+}
+
+pub(crate) fn detuning_limit_khz(pulse_width_ms: f64) -> f64 {
+    assert!(
+        pulse_width_ms.is_finite() && pulse_width_ms > 0.0,
+        "pulse width must be finite and positive"
+    );
+    let raw_limit = angular_frequency_to_khz(DETUNING_RANGE_FACTOR / pulse_width_ms);
+    (raw_limit / DETUNING_STEP_KHZ).floor() * DETUNING_STEP_KHZ
 }
 
 fn solver(params: &RamseyParameters, detuning_khz: f64) -> Result<RamseySolver, RamseySolverError> {
@@ -46,12 +57,8 @@ pub(crate) fn signal(
 }
 
 pub(crate) fn temporal_response(
-    params: &mut RamseyParameters,
+    params: &RamseyParameters,
 ) -> Result<RamseyResponse, RamseySolverError> {
-    let detuning_limit_khz = angular_frequency_to_khz(4.0 / params.pulse_width_ms);
-    params.detuning_khz = params
-        .detuning_khz
-        .clamp(-detuning_limit_khz, detuning_limit_khz);
     let mut response = solver(params, params.detuning_khz)?.detuning_response();
     // Convert response per angular-detuning impulse to response per kHz ms impulse.
     for value in &mut response.values {
@@ -61,7 +68,7 @@ pub(crate) fn temporal_response(
 }
 
 pub(crate) fn measurement_transfer(
-    params: &mut RamseyParameters,
+    params: &RamseyParameters,
 ) -> Result<TransferFunctionSamples, Box<dyn std::error::Error>> {
     Ok(temporal_response(params)?.transfer_function(MAX_ANGULAR_FREQUENCY_STEP)?)
 }
@@ -70,22 +77,20 @@ pub(crate) fn measurement_transfer(
 mod tests {
     use super::*;
 
-    fn assert_close(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() < 1.0e-10 * (1.0 + expected.abs()),
-            "actual {actual}, expected {expected}"
-        );
+    #[test]
+    fn detuning_slider_lattice_contains_zero() {
+        let limit = detuning_limit_khz(RamseyParameters::default().pulse_width_ms);
+        let snapped_zero = -limit + (limit / DETUNING_STEP_KHZ).round() * DETUNING_STEP_KHZ;
+        assert_eq!(snapped_zero, 0.0);
     }
 
     #[test]
-    fn selected_lock_point_sets_the_measurement_response() {
-        let mut params = RamseyParameters::default();
-        let positive = measurement_transfer(&mut params).unwrap().response_values()[0].re;
-        assert!(params.integrator_gain * positive > 0.0);
-        params.detuning_khz = -params.detuning_khz;
-        let negative = measurement_transfer(&mut params).unwrap().response_values()[0].re;
+    fn zero_detuning_is_a_responsive_lock_point() {
+        let params = RamseyParameters::default();
+        assert_eq!(params.detuning_khz, 0.0);
+        let dc_response = measurement_transfer(&params).unwrap().response_values()[0].re;
 
-        assert!(positive * negative < 0.0);
-        assert_close(positive.abs(), negative.abs());
+        assert!(dc_response.is_finite());
+        assert!(dc_response.abs() > 1.0e-3);
     }
 }

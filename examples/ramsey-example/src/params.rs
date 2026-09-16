@@ -1,4 +1,4 @@
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::PI;
 
 pub(crate) struct RamseyParameters {
     pub(crate) pulse_width_ms: f64,
@@ -19,7 +19,7 @@ impl Default for RamseyParameters {
             pulse_width_ms: 0.05,
             ramsey_time_ms: 2.0,
             pulse_area: 0.5 * PI,
-            detuning_khz: 0.0 / TAU,
+            detuning_khz: 0.0,
             time_steps: 501,
             oscillator_white_psd_log10: -4.0,
             oscillator_random_walk_log10: -6.0,

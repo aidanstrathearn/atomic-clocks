@@ -1,5 +1,5 @@
 use crate::params::RamseyParameters;
-use crate::ramsey::angular_frequency_to_khz;
+use crate::ramsey::{DETUNING_STEP_KHZ, detuning_limit_khz};
 use myplotlib::{Slider, SliderGrid, SliderGroup};
 use std::f64::consts::PI;
 
@@ -21,10 +21,17 @@ fn ramsey_sliders<'a>(
                 "Detuning (kHz)",
                 detuning_khz,
                 -detuning_limit_khz..=detuning_limit_khz,
-            ),
+            )
+            .step_by(DETUNING_STEP_KHZ),
             Slider::new("Time steps", time_steps, 2..=10_000),
         ],
     )
+}
+
+fn prepare_detuning_slider(params: &mut RamseyParameters) -> f64 {
+    let limit = detuning_limit_khz(params.pulse_width_ms);
+    params.detuning_khz = params.detuning_khz.clamp(-limit, limit);
+    limit
 }
 
 fn controller_sliders<'a>(
@@ -73,7 +80,7 @@ fn psd_sliders<'a>(
 }
 
 pub(crate) fn standard(params: &mut RamseyParameters) -> SliderGrid<'_> {
-    let detuning_limit_khz = angular_frequency_to_khz(4.0 / params.pulse_width_ms);
+    let detuning_limit_khz = prepare_detuning_slider(params);
     let RamseyParameters {
         pulse_width_ms,
         ramsey_time_ms,
@@ -97,7 +104,7 @@ pub(crate) fn standard(params: &mut RamseyParameters) -> SliderGrid<'_> {
 }
 
 pub(crate) fn feedback(params: &mut RamseyParameters) -> SliderGrid<'_> {
-    let detuning_limit_khz = angular_frequency_to_khz(4.0 / params.pulse_width_ms);
+    let detuning_limit_khz = prepare_detuning_slider(params);
     let RamseyParameters {
         pulse_width_ms,
         ramsey_time_ms,
@@ -133,7 +140,7 @@ pub(crate) fn feedback(params: &mut RamseyParameters) -> SliderGrid<'_> {
 }
 
 pub(crate) fn nyquist(params: &mut RamseyParameters) -> SliderGrid<'_> {
-    let detuning_limit_khz = angular_frequency_to_khz(4.0 / params.pulse_width_ms);
+    let detuning_limit_khz = prepare_detuning_slider(params);
     let RamseyParameters {
         pulse_width_ms,
         ramsey_time_ms,

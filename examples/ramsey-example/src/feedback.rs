@@ -23,7 +23,7 @@ pub(crate) fn controller(
 }
 
 pub(crate) fn spectra(
-    params: &mut RamseyParameters,
+    params: &RamseyParameters,
 ) -> Result<FeedbackPsdSamples, Box<dyn std::error::Error>> {
     let measurement = measurement_transfer(params)?;
     let grid = AngularFrequencyGrid::new(measurement.grid().values()[1..].to_vec())?;
@@ -52,9 +52,7 @@ pub(crate) struct FeedbackAdev {
     pub(crate) total: AdevSamples,
 }
 
-pub(crate) fn adev(
-    params: &mut RamseyParameters,
-) -> Result<FeedbackAdev, Box<dyn std::error::Error>> {
+pub(crate) fn adev(params: &RamseyParameters) -> Result<FeedbackAdev, Box<dyn std::error::Error>> {
     let spectra = spectra(params)?;
     let angular_frequencies = spectra.output().grid().values();
     let minimum_angular_frequency = angular_frequencies[0];
@@ -86,7 +84,7 @@ mod tests {
 
     #[test]
     fn default_feedback_spectra_are_finite_and_add_up() {
-        let spectra = spectra(&mut RamseyParameters::default()).unwrap();
+        let spectra = spectra(&RamseyParameters::default()).unwrap();
         assert!(!spectra.output().grid().values().is_empty());
         assert!(
             spectra
@@ -113,8 +111,23 @@ mod tests {
     }
 
     #[test]
+    fn controller_sign_matches_the_zero_detuning_slope() {
+        let params = RamseyParameters {
+            feedback_delay_ms: 0.0,
+            ..RamseyParameters::default()
+        };
+        let measurement = measurement_transfer(&params).unwrap();
+        let dc_slope = measurement.response_values()[0].re;
+        let controller = controller(&params, &measurement);
+        let omega = 1.0;
+        let signed_gain = -omega * controller.frequency_response(omega).im;
+
+        assert!(signed_gain * dc_slope > 0.0);
+    }
+
+    #[test]
     fn default_feedback_adev_is_finite() {
-        let adev = adev(&mut RamseyParameters::default()).unwrap();
+        let adev = adev(&RamseyParameters::default()).unwrap();
         assert_eq!(
             adev.free_running.averaging_times(),
             adev.total.averaging_times()
