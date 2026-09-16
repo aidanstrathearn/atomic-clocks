@@ -13,32 +13,13 @@ fn psd_per_khz_to_per_angular_frequency(value: f64) -> f64 {
     value / TAU
 }
 
-fn psd_per_angular_frequency_to_per_khz(value: f64) -> f64 {
-    TAU * value
-}
-
-fn density_per_khz(samples: &PsdSamples) -> Vec<f64> {
-    samples
-        .density_values()
-        .iter()
-        .map(|&value| psd_per_angular_frequency_to_per_khz(value))
-        .collect()
-}
-
 pub(crate) struct FeedbackSpectra {
-    pub(crate) frequencies_khz: Vec<f64>,
-    pub(crate) free_running: Vec<f64>,
-    pub(crate) injected_measurement_noise: Vec<f64>,
-    pub(crate) total: Vec<f64>,
-}
-
-struct FeedbackPsdSamples {
-    frequencies_khz: Vec<f64>,
-    free_running: PsdSamples,
-    #[cfg(test)]
-    residual_signal: PsdSamples,
-    injected_measurement_noise: PsdSamples,
-    total: PsdSamples,
+    pub(crate) free_running: PsdSamples,
+    /// Retained as part of the complete feedback decomposition; currently used by tests.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) residual_signal: PsdSamples,
+    pub(crate) injected_measurement_noise: PsdSamples,
+    pub(crate) total: PsdSamples,
 }
 
 pub(crate) fn controller(
@@ -50,16 +31,11 @@ pub(crate) fn controller(
     Integrator::new(signed_gain).then(Delay::new(params.feedback_delay_ms))
 }
 
-fn psd_samples(
+pub(crate) fn spectra(
     params: &mut RamseyParameters,
-) -> Result<FeedbackPsdSamples, Box<dyn std::error::Error>> {
+) -> Result<FeedbackSpectra, Box<dyn std::error::Error>> {
     let measurement = measurement_transfer(params)?;
     let grid = AngularFrequencyGrid::new(measurement.grid().values()[1..].to_vec())?;
-    let frequencies_khz = grid
-        .values()
-        .iter()
-        .map(|&omega| angular_frequency_to_khz(omega))
-        .collect();
 
     let oscillator_white_psd = 10.0_f64.powf(params.oscillator_white_psd_log10);
     let oscillator_random_walk = 10.0_f64.powf(params.oscillator_random_walk_log10);
@@ -79,30 +55,15 @@ fn psd_samples(
     let feedback = LtiFeedback::new(oscillator_noise, measurement_noise, measurement, controller);
 
     let free_running = feedback.free_running_psd().sample(&grid)?;
-    #[cfg(test)]
     let residual_signal = feedback.residual_signal_psd().sample(&grid)?;
     let injected_measurement_noise = feedback.injected_measurement_noise_psd().sample(&grid)?;
     let total = feedback.output_psd().sample(&grid)?;
 
-    Ok(FeedbackPsdSamples {
-        frequencies_khz,
+    Ok(FeedbackSpectra {
         free_running,
-        #[cfg(test)]
         residual_signal,
         injected_measurement_noise,
         total,
-    })
-}
-
-pub(crate) fn spectra(
-    params: &mut RamseyParameters,
-) -> Result<FeedbackSpectra, Box<dyn std::error::Error>> {
-    let samples = psd_samples(params)?;
-    Ok(FeedbackSpectra {
-        frequencies_khz: samples.frequencies_khz,
-        free_running: density_per_khz(&samples.free_running),
-        injected_measurement_noise: density_per_khz(&samples.injected_measurement_noise),
-        total: density_per_khz(&samples.total),
     })
 }
 
@@ -124,8 +85,8 @@ fn logarithmic_grid(start: f64, stop: f64, points: usize) -> Vec<f64> {
 pub(crate) fn adev(
     params: &mut RamseyParameters,
 ) -> Result<FeedbackAdev, Box<dyn std::error::Error>> {
-    let samples = psd_samples(params)?;
-    let angular_frequencies = samples.total.grid().values();
+    let spectra = spectra(params)?;
+    let angular_frequencies = spectra.total.grid().values();
     let minimum_angular_frequency = angular_frequencies[0];
     let maximum_angular_frequency = *angular_frequencies.last().unwrap();
     // Keep the useful part of the Allan-variance kernel inside the sampled band.
@@ -134,8 +95,8 @@ pub(crate) fn adev(
         1.0 / minimum_angular_frequency,
         N_AVERAGING_TIMES,
     );
-    let free_running = samples.free_running.to_adev(&averaging_times)?;
-    let total = samples.total.to_adev(&averaging_times)?;
+    let free_running = spectra.free_running.to_adev(&averaging_times)?;
+    let total = spectra.total.to_adev(&averaging_times)?;
     Ok(FeedbackAdev {
         free_running,
         total,
@@ -154,26 +115,24 @@ mod tests {
     }
 
     #[test]
-    fn psd_frequency_density_conversion_round_trips() {
-        let per_khz = 3.25;
-        assert_close(
-            psd_per_angular_frequency_to_per_khz(psd_per_khz_to_per_angular_frequency(per_khz)),
-            per_khz,
-        );
-    }
-
-    #[test]
     fn default_feedback_spectra_are_finite_and_add_up() {
-        let samples = psd_samples(&mut RamseyParameters::default()).unwrap();
-        assert!(!samples.frequencies_khz.is_empty());
-        assert!(samples.frequencies_khz.iter().all(|value| *value > 0.0));
-        for (((free_running, residual), injected), total) in samples
+        let spectra = spectra(&mut RamseyParameters::default()).unwrap();
+        assert!(!spectra.total.grid().values().is_empty());
+        assert!(
+            spectra
+                .total
+                .grid()
+                .values()
+                .iter()
+                .all(|value| *value > 0.0)
+        );
+        for (((free_running, residual), injected), total) in spectra
             .free_running
             .density_values()
             .iter()
-            .zip(samples.residual_signal.density_values())
-            .zip(samples.injected_measurement_noise.density_values())
-            .zip(samples.total.density_values())
+            .zip(spectra.residual_signal.density_values())
+            .zip(spectra.injected_measurement_noise.density_values())
+            .zip(spectra.total.density_values())
         {
             assert!(free_running.is_finite() && *free_running >= 0.0);
             assert!(residual.is_finite() && *residual >= 0.0);
