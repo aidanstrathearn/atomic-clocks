@@ -3,10 +3,10 @@ use crate::ramsey::temporal_response;
 use myplotlib::{AppResult, Plotter};
 
 pub(crate) fn plot(params: &mut RamseyParameters) -> AppResult {
-    let (relative_times, response) = temporal_response(params);
+    let response = temporal_response(params)?;
 
     let mut plot = Plotter::new();
-    plot.plot(&relative_times.array, &response)
+    plot.plot(&response.relative_times, &response.values)
         .label("Linear response");
     plot.axhline(0.0);
     plot.title(format!(
@@ -15,6 +15,6 @@ pub(crate) fn plot(params: &mut RamseyParameters) -> AppResult {
     ));
     plot.xlabel("Time relative to measurement, tau (ms)");
     plot.ylabel("Final ground probability response per kHz ms impulse");
-    plot.xlim(relative_times.array[0], 0.0);
+    plot.xlim(response.relative_times[0], 0.0);
     Ok(plot)
 }

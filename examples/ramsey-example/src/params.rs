@@ -13,16 +13,6 @@ pub(crate) struct RamseyParameters {
     pub(crate) feedback_delay_ms: f64,
 }
 
-impl RamseyParameters {
-    pub(crate) fn start_time_ms(&self) -> f64 {
-        -4.0 * self.pulse_width_ms
-    }
-
-    pub(crate) fn measurement_time_ms(&self) -> f64 {
-        self.ramsey_time_ms + 4.0 * self.pulse_width_ms
-    }
-}
-
 impl Default for RamseyParameters {
     fn default() -> Self {
         Self {

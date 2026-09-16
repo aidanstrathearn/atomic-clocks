@@ -3,7 +3,7 @@ use crate::ramsey::{angular_frequency_to_khz, measurement_transfer};
 use atomic_clocks::maths::linspace;
 use atomic_clocks::signal_processing::{
     AdevSamples, AngularFrequencyGrid, Delay, FunctionalPsd, Integrator, LtiFeedback, LtiFilter,
-    Psd, PsdSamples, Series, SpectrumError, TransferFunctionSamples,
+    Psd, PsdSamples, Series, TransferFunctionSamples,
 };
 use std::f64::consts::TAU;
 
@@ -50,7 +50,9 @@ pub(crate) fn controller(
     Integrator::new(signed_gain).then(Delay::new(params.feedback_delay_ms))
 }
 
-fn psd_samples(params: &mut RamseyParameters) -> Result<FeedbackPsdSamples, SpectrumError> {
+fn psd_samples(
+    params: &mut RamseyParameters,
+) -> Result<FeedbackPsdSamples, Box<dyn std::error::Error>> {
     let measurement = measurement_transfer(params)?;
     let grid = AngularFrequencyGrid::new(measurement.grid().values()[1..].to_vec())?;
     let frequencies_khz = grid
@@ -92,7 +94,9 @@ fn psd_samples(params: &mut RamseyParameters) -> Result<FeedbackPsdSamples, Spec
     })
 }
 
-pub(crate) fn spectra(params: &mut RamseyParameters) -> Result<FeedbackSpectra, SpectrumError> {
+pub(crate) fn spectra(
+    params: &mut RamseyParameters,
+) -> Result<FeedbackSpectra, Box<dyn std::error::Error>> {
     let samples = psd_samples(params)?;
     Ok(FeedbackSpectra {
         frequencies_khz: samples.frequencies_khz,
@@ -117,7 +121,9 @@ fn logarithmic_grid(start: f64, stop: f64, points: usize) -> Vec<f64> {
         .collect()
 }
 
-pub(crate) fn adev(params: &mut RamseyParameters) -> Result<FeedbackAdev, SpectrumError> {
+pub(crate) fn adev(
+    params: &mut RamseyParameters,
+) -> Result<FeedbackAdev, Box<dyn std::error::Error>> {
     let samples = psd_samples(params)?;
     let angular_frequencies = samples.total.grid().values();
     let minimum_angular_frequency = angular_frequencies[0];
