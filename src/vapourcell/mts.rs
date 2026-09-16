@@ -98,6 +98,8 @@ pub struct DemodOutput {
     pub harmonic: Vec<Demodulation>,
     /// Signed cosine and sine coefficients at twice the modulation frequency.
     pub second_harmonic: Vec<Demodulation>,
+    /// Signed cosine and sine coefficients at three times the modulation frequency.
+    pub third_harmonic: Vec<Demodulation>,
 }
 
 /// Demodulates the expectation of `observable · sigma` in the selected frame.
@@ -132,6 +134,7 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
     let mut dc = Vec::with_capacity(hz_array.len());
     let mut harmonic = Vec::with_capacity(hz_array.len());
     let mut second_harmonic = Vec::with_capacity(hz_array.len());
+    let mut third_harmonic = Vec::with_capacity(hz_array.len());
 
     for &hz_offset in &hz_array {
         let mut projected = vec![0.0; last_period_samples];
@@ -160,6 +163,7 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
         dc.push(lockin_period(&projected, 0));
         harmonic.push(lockin_period(&projected, 1));
         second_harmonic.push(lockin_period(&projected, 2));
+        third_harmonic.push(lockin_period(&projected, 3));
     }
 
     Ok(DemodOutput {
@@ -167,6 +171,7 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
         dc,
         harmonic,
         second_harmonic,
+        third_harmonic,
     })
 }
 
@@ -241,7 +246,12 @@ mod tests {
                 .expect("default scan succeeds");
             assert_eq!(output.hz.len(), params.solver.hz_num);
             assert!(output.hz.iter().all(|value| value.is_finite()));
-            for values in [&output.dc, &output.harmonic, &output.second_harmonic] {
+            for values in [
+                &output.dc,
+                &output.harmonic,
+                &output.second_harmonic,
+                &output.third_harmonic,
+            ] {
                 assert_eq!(values.len(), params.solver.hz_num);
                 assert!(
                     values
