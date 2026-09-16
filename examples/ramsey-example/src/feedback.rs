@@ -1,6 +1,6 @@
 use crate::params::RamseyParameters;
 use crate::ramsey::{angular_frequency_to_khz, measurement_transfer};
-use atomic_clocks::maths::linspace;
+use atomic_clocks::maths::logspace;
 use atomic_clocks::signal_processing::{
     AdevSamples, AngularFrequencyGrid, Delay, FunctionalPsd, Integrator, LtiFeedback, LtiFilter,
     Psd, PsdSamples, Series, TransferFunctionSamples,
@@ -72,16 +72,6 @@ pub(crate) struct FeedbackAdev {
     pub(crate) total: AdevSamples,
 }
 
-fn logarithmic_grid(start: f64, stop: f64, points: usize) -> Vec<f64> {
-    assert!(start.is_finite() && start > 0.0);
-    assert!(stop.is_finite() && stop > start);
-    assert!(points >= 2);
-    linspace(start.ln(), stop.ln(), points - 1)
-        .into_iter()
-        .map(f64::exp)
-        .collect()
-}
-
 pub(crate) fn adev(
     params: &mut RamseyParameters,
 ) -> Result<FeedbackAdev, Box<dyn std::error::Error>> {
@@ -90,10 +80,10 @@ pub(crate) fn adev(
     let minimum_angular_frequency = angular_frequencies[0];
     let maximum_angular_frequency = *angular_frequencies.last().unwrap();
     // Keep the useful part of the Allan-variance kernel inside the sampled band.
-    let averaging_times = logarithmic_grid(
+    let averaging_times = logspace(
         TAU / maximum_angular_frequency,
         1.0 / minimum_angular_frequency,
-        N_AVERAGING_TIMES,
+        N_AVERAGING_TIMES - 1,
     );
     let free_running = spectra.free_running.to_adev(&averaging_times)?;
     let total = spectra.total.to_adev(&averaging_times)?;

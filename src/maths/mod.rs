@@ -125,3 +125,22 @@ impl Linspace {
 pub fn linspace(start: f64, stop: f64, nsteps: usize) -> Vec<f64> {
     Linspace::new(start, stop, nsteps).array
 }
+
+/// Returns the `nsteps + 1` geometrically spaced boundary points of `nsteps`
+/// logarithmic intervals, including both endpoints. The endpoints and number
+/// of intervals must be positive, with `stop > start`.
+pub fn logspace(start: f64, stop: f64, nsteps: usize) -> Vec<f64> {
+    assert!(
+        start.is_finite() && start > 0.0,
+        "Logspace start must be finite and positive"
+    );
+    assert!(
+        stop.is_finite() && stop > start,
+        "Logspace stop must be finite and greater than start"
+    );
+    assert!(nsteps > 0, "Logspace requires at least one interval");
+    linspace(start.ln(), stop.ln(), nsteps)
+        .into_iter()
+        .map(f64::exp)
+        .collect()
+}
