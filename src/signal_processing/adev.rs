@@ -62,12 +62,7 @@ fn allan_variance_weight(omega: f64, averaging_time: f64) -> f64 {
     if phase == 0.0 {
         return 0.0;
     }
-    if phase.abs() < 1.0 {
-        let sinc = phase.sin() / phase;
-        2.0 * phase * phase * sinc.powi(4)
-    } else {
-        2.0 * phase.sin().powi(4) / phase.powi(2)
-    }
+    2.0 * phase.sin().powi(4) / phase.powi(2)
 }
 
 impl PsdSamples {

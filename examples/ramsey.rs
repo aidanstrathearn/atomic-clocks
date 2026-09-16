@@ -15,8 +15,8 @@ use myplotlib::{
 };
 
 const N_DETUNINGS: usize = 500;
-const N_AVERAGING_TIMES: usize = 200;
-const FREQUENCY_STEP_KHZ: f64 = 0.1 / TAU;
+const N_AVERAGING_TIMES: usize = 30;
+const FREQUENCY_STEP_KHZ: f64 = 0.05 / TAU;
 
 fn khz_to_angular_frequency(frequency_khz: f64) -> f64 {
     TAU * frequency_khz
