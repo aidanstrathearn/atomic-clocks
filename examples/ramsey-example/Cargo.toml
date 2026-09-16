@@ -1,0 +1,9 @@
+[package]
+name = "ramsey-example"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+atomic-clocks = { path = "../.." }
+myplotlib = { git = "https://github.com/aidanstrathearn/myplotlib.git" }

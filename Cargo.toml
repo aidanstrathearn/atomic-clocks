@@ -1,5 +1,15 @@
 [package]
 name = "atomic-clocks"
+version.workspace = true
+edition.workspace = true
+
+[workspace]
+members = [".", "examples/ramsey-example"]
+default-members = [".", "examples/ramsey-example"]
+exclude = ["local-examples"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
@@ -8,7 +18,6 @@ rustfft = "6.4.1"
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
-myplotlib = { git = "https://github.com/aidanstrathearn/myplotlib.git" }
 
 [[bench]]
 name = "propagation"
