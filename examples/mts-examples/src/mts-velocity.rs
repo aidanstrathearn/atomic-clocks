@@ -251,7 +251,7 @@ fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
     }
 
     let samples = velocity_samples(params)?;
-    let harmonics: Vec<_> = (1..=params.gradient_harmonics).collect();
+    let harmonics: Vec<_> = (0..=params.gradient_harmonics).collect();
     let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
 
     // Collect in sample order so the weighted sum is independent of Rayon scheduling.
@@ -296,7 +296,7 @@ fn harmonic_gradient_plot(params: &mut Params) -> AppResult {
         .into_iter()
         .map(f64::abs)
         .collect();
-    let harmonics: Vec<_> = (1..=params.gradient_harmonics)
+    let harmonics: Vec<_> = (0..=params.gradient_harmonics)
         .map(|harmonic| harmonic as f64)
         .collect();
 
