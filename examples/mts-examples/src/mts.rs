@@ -45,8 +45,8 @@ pub(super) fn scan_control_group<'a>(
     SliderGroup::new(
         "Scan",
         [
-            frequency_slider("Detuning half-range", hz_lim, 0.1..=60.0),
-            Slider::new("Detuning samples", hz_num, 2..=500),
+            frequency_slider("Detuning half-range", hz_lim, 0.1..=65.0),
+            Slider::new("Detuning samples", hz_num, 2..=200),
         ],
     )
 }
@@ -62,17 +62,16 @@ pub(super) fn atom_control_groups<'a>(
         SliderGroup::new(
             "Modulation",
             [
-                frequency_slider("Frequency", &mut modulation.frequency, 0.1..=10.0)
-                    .logarithmic(true),
-                frequency_slider("Depth", &mut modulation.depth, 0.0..=10.0),
-                frequency_slider("Shift", &mut modulation.shift, -10.0..=10.0),
+                frequency_slider("Frequency", &mut modulation.frequency, 0.1..=20.0),
+                frequency_slider("Depth", &mut modulation.depth, 0.0..=20.0),
+                frequency_slider("Shift", &mut modulation.shift, -40.0..=40.0),
             ],
         ),
         SliderGroup::new(
             "Rates",
             [
-                frequency_slider("Pump Rabi", r_pump, 0.0..=10.0),
-                frequency_slider("Probe Rabi", r_prbe, 0.0..=2.0),
+                frequency_slider("Pump Rabi", r_pump, 0.0..=20.0),
+                frequency_slider("Probe Rabi", r_prbe, 0.0..=20.0),
                 frequency_slider("Decay", gamma_down, 0.01..=10.0).logarithmic(true),
                 frequency_slider("Dephasing", gamma_phi, 0.0..=10.0),
             ],

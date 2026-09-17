@@ -19,7 +19,7 @@ pub(super) fn control_group<'a>(
         "Velocity distribution",
         [
             frequency_slider("Sigma", kv_sigma, 0.1..=3000.0).logarithmic(true),
-            frequency_slider("Integration window", kv_window_half_width, 0.1..=20.0),
+            frequency_slider("Integration window", kv_window_half_width, 0.1..=40.0),
             Slider::new("Samples", kv_samples, 1..=201),
         ],
     )
