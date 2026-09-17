@@ -4,12 +4,10 @@ use atomic_clocks::twolevel::{Decay, Vec3};
 use atomic_clocks::vapourcell::{DemodOutput, Frame, HamiltonianParams, MtsParams, compute_demod};
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
-/// Scalar curves used for plotting and for the existing per-velocity summation.
+/// Scalar curves derived from one combined demodulation output for plotting.
 pub(super) struct MtsCurves {
     pub hz: Vec<f64>,
     pub amp0: Vec<f64>,
-    pub proj0: Vec<f64>,
-    pub amp1: Vec<f64>,
     pub proj1: Vec<f64>,
     pub proj2: Vec<f64>,
     pub proj3: Vec<f64>,
@@ -22,23 +20,10 @@ impl From<DemodOutput> for MtsCurves {
             .iter()
             .map(|value| value.amplitude() / 2.0)
             .collect();
-        let amp1: Vec<_> = output
-            .harmonic
-            .iter()
-            .map(|value| value.amplitude())
-            .collect();
-        let proj1 = output
-            .harmonic
-            .iter()
-            .zip(&amp1)
-            .map(|(value, &amplitude)| amplitude * value.phase().cos())
-            .collect();
         Self {
             hz: output.hz,
-            proj0: amp0.clone(),
             amp0,
-            amp1,
-            proj1,
+            proj1: output.harmonic.iter().map(|value| value.in_phase).collect(),
             proj2: output
                 .second_harmonic
                 .iter()
@@ -113,7 +98,7 @@ pub(super) fn atom_control_groups<'a>(
                 Slider::new("Pump Rabi frequency", &mut hamiltonian.r_pump, 0.0..=10.0),
                 Slider::new("Probe Rabi frequency", &mut hamiltonian.r_prbe, 0.0..=2.0),
                 Slider::new("Detuning offset", &mut hamiltonian.delta, -10.0..=10.0),
-                Slider::new(kv_label, &mut hamiltonian.kv, -10.0..=10.0),
+                Slider::new(kv_label, &mut hamiltonian.kv, -50.0..=50.0),
                 Slider::new("Spatial phase (kr)", &mut hamiltonian.kr, -PI..=PI),
             ],
         ),
