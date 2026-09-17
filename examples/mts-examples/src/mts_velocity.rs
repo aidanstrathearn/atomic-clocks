@@ -25,8 +25,8 @@ impl Default for Params {
         Self {
             mts: MtsParams::default(),
             kv_sigma: 10.0,
-            kv_window_half_width: 5.0,
-            kv_samples: 21,
+            kv_window_half_width: 0.01,
+            kv_samples: 1,
             gradient_epsilon: 1e-3,
             gradient_harmonics: 10,
             response_time_fraction: 0.0,
