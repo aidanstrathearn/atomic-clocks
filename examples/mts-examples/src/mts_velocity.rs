@@ -38,15 +38,15 @@ impl Default for Params {
 
 pub(crate) fn definition() -> AppDefinition<Params> {
     const VIEWS: &[ViewOption<Params>] = &[
-        ViewOption::new("Probe", probe::plot, probe::controls),
-        ViewOption::new("Linear response", response::plot, response::controls),
+        ViewOption::new("Signal", probe::plot, probe::controls),
+        //ViewOption::new("Linear response", response::plot, response::controls),
         ViewOption::new(
-            "Demodulated response",
+            "Linear response",
             response::demodulated_plot,
             response::demodulated_controls,
         ),
         ViewOption::new(
-            "Frequency response",
+            "Transfer function",
             response::frequency_plot,
             response::demodulated_controls,
         ),

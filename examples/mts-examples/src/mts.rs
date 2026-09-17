@@ -91,7 +91,7 @@ pub(super) fn signal_plot(params: &MtsParams, output: &MtsCurves) -> Plotter {
         .label("Second harmonic");
     plot.plot(&detunings_mhz, &output.proj3)
         .label("Third harmonic");
-    plot.xlabel("Detuning relative to offset (MHz)");
+    plot.xlabel("Detuning (MHz)");
     plot.ylabel("Demodulated signal");
     plot.xlim(to_mhz(-params.solver.hz_lim), to_mhz(params.solver.hz_lim));
     plot
