@@ -313,7 +313,7 @@ fn harmonic_gradient_plot(params: &mut Params) -> AppResult {
     ));
     plot.xlabel("Harmonic number");
     plot.ylabel("|d(in-phase signal) / dΔ|");
-    plot.xlim(0.5, params.gradient_harmonics as f64 + 0.5);
+    plot.xlim(0.0, params.gradient_harmonics as f64 + 0.5);
     plot.yscale(AxisScale::Log10);
     Ok(plot)
 }
