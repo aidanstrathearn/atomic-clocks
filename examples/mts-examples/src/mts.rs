@@ -55,7 +55,6 @@ pub(super) fn atom_control_groups<'a>(
     modulation: &'a mut ModulationParams,
     r_pump: &'a mut f64,
     r_prbe: &'a mut f64,
-    delta: &'a mut f64,
     gamma_down: &'a mut f64,
     gamma_phi: &'a mut f64,
 ) -> [SliderGroup<'a>; 3] {
@@ -74,7 +73,6 @@ pub(super) fn atom_control_groups<'a>(
             [
                 frequency_slider("Pump Rabi frequency", r_pump, 0.0..=10.0),
                 frequency_slider("Probe Rabi frequency", r_prbe, 0.0..=2.0),
-                frequency_slider("Detuning offset", delta, -10.0..=10.0),
             ],
         ),
         SliderGroup::new(

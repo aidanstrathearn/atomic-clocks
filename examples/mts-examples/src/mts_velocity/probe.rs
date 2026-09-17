@@ -10,13 +10,13 @@ use crate::mts::{self, MtsCurves};
 use crate::units::to_mhz;
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
+    params.mts.hamiltonian.delta = 0.0;
     params.mts.hamiltonian.kr = 0.0;
     params.mts.decay.gamma_up = 0.0;
     let atom = mts::atom_control_groups(
         &mut params.mts.hamiltonian.modulation,
         &mut params.mts.hamiltonian.r_pump,
         &mut params.mts.hamiltonian.r_prbe,
-        &mut params.mts.hamiltonian.delta,
         &mut params.mts.decay.gamma_down,
         &mut params.mts.decay.gamma_phi,
     );

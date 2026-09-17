@@ -24,6 +24,7 @@ pub(super) fn demodulated_controls(params: &mut Params) -> SliderGrid<'_> {
 }
 
 fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
+    params.mts.hamiltonian.delta = 0.0;
     params.mts.hamiltonian.kr = 0.0;
     params.mts.decay.gamma_up = 0.0;
     let time_step = 1.0 / params.mts.solver.steps_per_period as f64;
@@ -68,7 +69,6 @@ fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
             &mut params.mts.hamiltonian.modulation,
             &mut params.mts.hamiltonian.r_pump,
             &mut params.mts.hamiltonian.r_prbe,
-            &mut params.mts.hamiltonian.delta,
             &mut params.mts.decay.gamma_down,
             &mut params.mts.decay.gamma_phi,
         )
@@ -167,7 +167,6 @@ pub(super) fn response_output(params: &Params) -> Result<LinearResponseOutput, S
 
 pub(super) fn plot(params: &mut Params) -> AppResult {
     let output = response_output(params)?;
-    let atom = &params.mts.hamiltonian;
     // Select the nearest computed observation time, retaining t = T as a
     // distinct endpoint. Keep the slider aligned when resolution changes.
     let index = (params.response_time_fraction.clamp(0.0, 1.0)
@@ -179,11 +178,10 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     plot.plot(&output.delays, &output.response[index])
         .label("C(t, t - τ)");
     plot.title(format!(
-        "Probe-frame response: t/T = {:.3}, t = {:.3} µs, detuning = {:.3} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
+        "Probe-frame response at zero detuning: t/T = {:.3}, t = {:.3} µs, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
         params.response_time_fraction,
         output.times[index],
-        to_mhz(atom.delta),
-        to_mhz(atom.kv),
+        to_mhz(params.mts.hamiltonian.kv),
         to_mhz(params.kv_sigma),
         to_mhz(params.kv_window_half_width),
         params.kv_samples,
@@ -192,7 +190,7 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     plot.ylabel("C(t, t - τ): σy response to σz / 2");
     plot.xlim(
         0.0,
-        params.response_delay_periods as f64 * atom.modulation.period(),
+        params.response_delay_periods as f64 * params.mts.hamiltonian.modulation.period(),
     );
     Ok(plot)
 }
@@ -219,8 +217,6 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
         .iter()
         .map(|value| value.in_phase)
         .collect();
-    let atom = &params.mts.hamiltonian;
-
     let mut plot = Plotter::new();
     plot.plot(&output.delays, &dc)
         .label("DC (twice signed mean)");
@@ -231,9 +227,8 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
     plot.plot(&output.delays, &third_harmonic)
         .label("Third harmonic (in phase)");
     plot.title(format!(
-        "Demodulated probe-frame response: detuning = {:.3} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
-        to_mhz(atom.delta),
-        to_mhz(atom.kv),
+        "Demodulated probe-frame response at zero detuning: Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
+        to_mhz(params.mts.hamiltonian.kv),
         to_mhz(params.kv_sigma),
         to_mhz(params.kv_window_half_width),
         params.kv_samples,
@@ -242,7 +237,7 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
     plot.ylabel("Demodulated σy response to σz / 2");
     plot.xlim(
         0.0,
-        params.response_delay_periods as f64 * atom.modulation.period(),
+        params.response_delay_periods as f64 * params.mts.hamiltonian.modulation.period(),
     );
     Ok(plot)
 }
@@ -280,8 +275,7 @@ pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
         plot.plot(&frequencies_mhz, &magnitude).label(label);
     }
     plot.title(format!(
-        "Demodulated frequency response: detuning = {:.3} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
-        to_mhz(atom.delta),
+        "Demodulated frequency response at zero detuning: Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
         to_mhz(atom.kv),
         to_mhz(params.kv_sigma),
         to_mhz(params.kv_window_half_width),

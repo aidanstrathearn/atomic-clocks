@@ -10,6 +10,7 @@ use crate::mts;
 use crate::units::{angular_gradient_to_per_mhz, frequency_slider, to_mhz};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
+    params.mts.hamiltonian.delta = 0.0;
     params.mts.hamiltonian.kr = 0.0;
     params.mts.decay.gamma_up = 0.0;
     let gradient = SliderGroup::new(
@@ -43,7 +44,6 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
             &mut params.mts.hamiltonian.modulation,
             &mut params.mts.hamiltonian.r_pump,
             &mut params.mts.hamiltonian.r_prbe,
-            &mut params.mts.hamiltonian.delta,
             &mut params.mts.decay.gamma_down,
             &mut params.mts.decay.gamma_phi,
         )
@@ -120,8 +120,7 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     let mut plot = Plotter::new();
     plot.plot(&harmonics, &magnitudes).label("|dI/dΔ|");
     plot.title(format!(
-        "Velocity-averaged harmonic gradients at relative detuning 0: Δ = {:.3} MHz, ε = {:.2e} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
-        to_mhz(params.mts.hamiltonian.delta),
+        "Velocity-averaged harmonic gradients at zero detuning: ε = {:.2e} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
         to_mhz(params.gradient_epsilon),
         to_mhz(params.mts.hamiltonian.kv),
         to_mhz(params.kv_sigma),
