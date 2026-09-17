@@ -210,7 +210,7 @@ fn harmonic_gradient_controls(params: &mut Params) -> SliderGrid<'_> {
             )
             .logarithmic(true),
             Slider::new("Maximum harmonic", &mut params.gradient_harmonics, 1..=50),
-            Slider::new("Spatial phase samples", &mut params.mts.solver.kr_n, 1..=20),
+            Slider::new("Spatial phase samples", &mut params.mts.solver.kr_n, 1..=21).step_by(2.0),
             Slider::new(
                 "Steps per period",
                 &mut params.mts.solver.steps_per_period,
@@ -349,7 +349,7 @@ fn response_control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_>
                 &mut params.response_delay_periods,
                 1..=20,
             ),
-            Slider::new("Spatial phase samples", &mut params.mts.solver.kr_n, 1..=20),
+            Slider::new("Spatial phase samples", &mut params.mts.solver.kr_n, 1..=21).step_by(2.0),
             Slider::new(
                 "Steps per period",
                 &mut params.mts.solver.steps_per_period,

@@ -57,7 +57,7 @@ pub(super) fn control_groups<'a>(
             [
                 Slider::new("Detuning half-range", &mut params.solver.hz_lim, 0.1..=40.0),
                 Slider::new("Detuning samples", &mut params.solver.hz_num, 2..=500),
-                Slider::new("Spatial phase samples", &mut params.solver.kr_n, 1..=20),
+                Slider::new("Spatial phase samples", &mut params.solver.kr_n, 1..=21).step_by(2.0),
                 Slider::new(
                     "Steps per period",
                     &mut params.solver.steps_per_period,
