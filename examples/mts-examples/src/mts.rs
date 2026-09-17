@@ -1,8 +1,8 @@
 use std::f64::consts::PI;
 
-use atomic_clocks::twolevel::{Decay, Vec3};
-use atomic_clocks::vapourcell::{DemodOutput, Frame, HamiltonianParams, MtsParams, compute_demod};
-use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
+use atomic_clocks::twolevel::Decay;
+use atomic_clocks::vapourcell::{DemodOutput, HamiltonianParams, MtsParams};
+use myplotlib::{Plotter, Slider, SliderGroup};
 
 use crate::units::{frequency_slider, to_mhz};
 
@@ -38,10 +38,6 @@ impl From<DemodOutput> for MtsCurves {
                 .collect(),
         }
     }
-}
-
-fn controls(params: &mut MtsParams) -> SliderGrid<'_> {
-    SliderGrid::new(5, control_groups(params, "Doppler shift (kv)"))
 }
 
 pub(super) fn control_groups<'a>(
@@ -116,26 +112,6 @@ pub(super) fn atom_control_groups<'a>(
     ]
 }
 
-fn plot(params: &MtsParams, frame: Frame) -> AppResult {
-    let frame_params = MtsParams {
-        hamiltonian: HamiltonianParams {
-            frame,
-            ..params.hamiltonian
-        },
-        ..*params
-    };
-    let output = MtsCurves::from(compute_demod(
-        &frame_params,
-        Vec3::from_angles(PI / 2.0, PI / 2.0),
-    )?);
-
-    Ok(signal_plot(
-        params,
-        &output,
-        format!("MTS: {} frame", frame.as_str()),
-    ))
-}
-
 pub(super) fn signal_plot(params: &MtsParams, output: &MtsCurves, title: String) -> Plotter {
     let mut plot = Plotter::new();
     let detunings_mhz: Vec<_> = output.hz.iter().copied().map(to_mhz).collect();
@@ -152,25 +128,4 @@ pub(super) fn signal_plot(params: &MtsParams, output: &MtsCurves, title: String)
     plot.ylabel("Demodulated signal");
     plot.xlim(to_mhz(-params.solver.hz_lim), to_mhz(params.solver.hz_lim));
     plot
-}
-
-fn pump_plot(params: &mut MtsParams) -> AppResult {
-    plot(params, Frame::Pump)
-}
-
-fn atom_plot(params: &mut MtsParams) -> AppResult {
-    plot(params, Frame::Atom)
-}
-
-fn probe_plot(params: &mut MtsParams) -> AppResult {
-    plot(params, Frame::Probe)
-}
-
-pub(crate) fn definition() -> AppDefinition<MtsParams> {
-    const VIEWS: &[ViewOption<MtsParams>] = &[
-        ViewOption::new("Probe", probe_plot, controls),
-        ViewOption::new("Pump", pump_plot, controls),
-        ViewOption::new("Atom", atom_plot, controls),
-    ];
-    AppDefinition::new("MTS", "mts-canvas", VIEWS)
 }
