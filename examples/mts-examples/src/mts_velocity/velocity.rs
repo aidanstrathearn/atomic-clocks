@@ -17,16 +17,16 @@ pub(super) fn control_group<'a>(
     kv_samples: &'a mut usize,
 ) -> SliderGroup<'a> {
     SliderGroup::new(
-        "Truncated Gaussian velocity distribution",
+        "Velocity distribution",
         [
-            frequency_slider("Gaussian mean (kv)", kv_mean, -50.0..=50.0),
-            frequency_slider("Gaussian sigma (kv)", kv_sigma, 0.1..=3000.0).logarithmic(true),
+            frequency_slider("Mean", kv_mean, -50.0..=50.0),
+            frequency_slider("Sigma", kv_sigma, 0.1..=3000.0).logarithmic(true),
             frequency_slider(
-                "Integration half-width around kv = 0",
+                "Integration window",
                 kv_window_half_width,
                 0.1..=20.0,
             ),
-            Slider::new("Velocity samples", kv_samples, 1..=201),
+            Slider::new("Samples", kv_samples, 1..=201),
         ],
     )
 }
