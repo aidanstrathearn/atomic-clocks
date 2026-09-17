@@ -8,6 +8,13 @@ fn main() -> myplotlib::Result {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn main() {
-    myplotlib::run_web(mts_velocity::definition()).expect("failed to start the web app");
+pub use wasm_bindgen_rayon::init_thread_pool;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = startApp)]
+pub fn start_app() -> Result<(), wasm_bindgen::JsValue> {
+    myplotlib::run_web(mts_velocity::definition())
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}

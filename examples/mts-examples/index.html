@@ -23,5 +23,19 @@
   </head>
   <body>
     <canvas id="mts-velocity-canvas"></canvas>
+    <script type="module">
+      window.addEventListener("TrunkApplicationStarted", async () => {
+        if (!window.crossOriginIsolated) {
+          throw new Error(
+            "MTS velocity requires cross-origin isolation for WebAssembly threads",
+          );
+        }
+
+        const threads = Math.max(1, navigator.hardwareConcurrency ?? 1);
+        //const threads = 1;  // this is for easy test that threading is working
+        await window.wasmBindings.initThreadPool(threads);
+        window.wasmBindings.startApp();
+      });
+    </script>
   </body>
 </html>
