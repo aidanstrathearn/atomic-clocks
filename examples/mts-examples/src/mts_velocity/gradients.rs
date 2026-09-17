@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 use super::{Params, velocity};
 use crate::mts;
-use crate::units::{angular_gradient_to_per_mhz, frequency_slider, to_mhz};
+use crate::units::{angular_gradient_to_per_mhz, frequency_slider};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     params.mts.hamiltonian.delta = 0.0;
@@ -119,14 +119,6 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
 
     let mut plot = Plotter::new();
     plot.plot(&harmonics, &magnitudes).label("|dI/dΔ|");
-    plot.title(format!(
-        "Velocity-averaged harmonic gradients at zero detuning: ε = {:.2e} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
-        to_mhz(params.gradient_epsilon),
-        to_mhz(params.mts.hamiltonian.kv),
-        to_mhz(params.kv_sigma),
-        to_mhz(params.kv_window_half_width),
-        params.kv_samples,
-    ));
     plot.xlabel("Harmonic number");
     plot.ylabel("|d(in-phase signal) / dΔ| (per MHz)");
     plot.xlim(0.0, params.gradient_harmonics as f64 + 0.5);

@@ -177,15 +177,6 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     let mut plot = Plotter::new();
     plot.plot(&output.delays, &output.response[index])
         .label("C(t, t - τ)");
-    plot.title(format!(
-        "Probe-frame response at zero detuning: t/T = {:.3}, t = {:.3} µs, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
-        params.response_time_fraction,
-        output.times[index],
-        to_mhz(params.mts.hamiltonian.kv),
-        to_mhz(params.kv_sigma),
-        to_mhz(params.kv_window_half_width),
-        params.kv_samples,
-    ));
     plot.xlabel("Delay τ (µs)");
     plot.ylabel("C(t, t - τ): σy response to σz / 2");
     plot.xlim(
@@ -226,13 +217,6 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
         .label("Second harmonic (in phase)");
     plot.plot(&output.delays, &third_harmonic)
         .label("Third harmonic (in phase)");
-    plot.title(format!(
-        "Demodulated probe-frame response at zero detuning: Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
-        to_mhz(params.mts.hamiltonian.kv),
-        to_mhz(params.kv_sigma),
-        to_mhz(params.kv_window_half_width),
-        params.kv_samples,
-    ));
     plot.xlabel("Delay τ (µs)");
     plot.ylabel("Demodulated σy response to σz / 2");
     plot.xlim(
@@ -274,13 +258,6 @@ pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
             .collect();
         plot.plot(&frequencies_mhz, &magnitude).label(label);
     }
-    plot.title(format!(
-        "Demodulated frequency response at zero detuning: Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
-        to_mhz(atom.kv),
-        to_mhz(params.kv_sigma),
-        to_mhz(params.kv_window_half_width),
-        params.kv_samples,
-    ));
     plot.xlabel("Frequency (MHz)");
     plot.ylabel("Fourier magnitude of demodulated response");
     plot.xlim(0.0, to_mhz(PI / step));
