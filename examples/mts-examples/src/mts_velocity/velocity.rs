@@ -2,6 +2,7 @@ use atomic_clocks::maths::normalised_gaussian;
 use myplotlib::{Slider, SliderGroup};
 
 use super::Params;
+use crate::units::frequency_slider;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct VelocitySample {
@@ -17,8 +18,8 @@ pub(super) fn control_group<'a>(
     SliderGroup::new(
         "Truncated Gaussian velocity distribution",
         [
-            Slider::new("Gaussian sigma (kv)", kv_sigma, 0.1..=100.0).logarithmic(true),
-            Slider::new(
+            frequency_slider("Gaussian sigma (kv)", kv_sigma, 0.1..=3000.0).logarithmic(true),
+            frequency_slider(
                 "Integration half-width around kv = 0",
                 kv_window_half_width,
                 0.1..=20.0,

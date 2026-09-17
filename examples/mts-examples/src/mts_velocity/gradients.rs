@@ -7,12 +7,13 @@ use rayon::prelude::*;
 
 use super::{Params, velocity};
 use crate::mts;
+use crate::units::{angular_gradient_to_per_mhz, frequency_slider, to_mhz};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     let gradient = SliderGroup::new(
         "Harmonic gradient",
         [
-            Slider::new(
+            frequency_slider(
                 "Finite-difference epsilon",
                 &mut params.gradient_epsilon,
                 1e-6..=0.1,
@@ -103,6 +104,7 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
 pub(super) fn plot(params: &mut Params) -> AppResult {
     let magnitudes: Vec<_> = harmonic_gradients(params)?
         .into_iter()
+        .map(angular_gradient_to_per_mhz)
         .map(f64::abs)
         .collect();
     let harmonics: Vec<_> = (0..=params.gradient_harmonics)
@@ -112,16 +114,16 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     let mut plot = Plotter::new();
     plot.plot(&harmonics, &magnitudes).label("|dI/dΔ|");
     plot.title(format!(
-        "Velocity-averaged harmonic gradients at relative detuning 0: Δ = {:.3}, ε = {:.2e}, Gaussian μ = {:.3}, σ = {:.3}, |kv| ≤ {:.3} ({} samples)",
-        params.mts.hamiltonian.delta,
-        params.gradient_epsilon,
-        params.mts.hamiltonian.kv,
-        params.kv_sigma,
-        params.kv_window_half_width,
+        "Velocity-averaged harmonic gradients at relative detuning 0: Δ = {:.3} MHz, ε = {:.2e} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
+        to_mhz(params.mts.hamiltonian.delta),
+        to_mhz(params.gradient_epsilon),
+        to_mhz(params.mts.hamiltonian.kv),
+        to_mhz(params.kv_sigma),
+        to_mhz(params.kv_window_half_width),
         params.kv_samples,
     ));
     plot.xlabel("Harmonic number");
-    plot.ylabel("|d(in-phase signal) / dΔ|");
+    plot.ylabel("|d(in-phase signal) / dΔ| (per MHz)");
     plot.xlim(0.0, params.gradient_harmonics as f64 + 0.5);
     plot.yscale(AxisScale::Log10);
     Ok(plot)

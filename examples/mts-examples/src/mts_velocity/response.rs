@@ -11,8 +11,9 @@ use rayon::prelude::*;
 
 use super::{Params, velocity};
 use crate::mts;
+use crate::units::to_mhz;
 
-const FREQUENCY_STEP: f64 = 0.02; // Maximum angular-frequency spacing, in rad / time.
+const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     control_grid(params, true)
@@ -172,16 +173,16 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     plot.plot(&output.delays, &output.response[index])
         .label("C(t, t - τ)");
     plot.title(format!(
-        "Probe-frame response: t/T = {:.3}, t = {:.3}, detuning = {:.3}, Gaussian μ = {:.3}, σ = {:.3}, |kv| ≤ {:.3} ({} samples)",
+        "Probe-frame response: t/T = {:.3}, t = {:.3} µs, detuning = {:.3} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
         params.response_time_fraction,
         output.times[index],
-        atom.delta,
-        atom.kv,
-        params.kv_sigma,
-        params.kv_window_half_width,
+        to_mhz(atom.delta),
+        to_mhz(atom.kv),
+        to_mhz(params.kv_sigma),
+        to_mhz(params.kv_window_half_width),
         params.kv_samples,
     ));
-    plot.xlabel("Delay τ (time)");
+    plot.xlabel("Delay τ (µs)");
     plot.ylabel("C(t, t - τ): σy response to σz / 2");
     plot.xlim(
         0.0,
@@ -224,14 +225,14 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
     plot.plot(&output.delays, &third_harmonic)
         .label("Third harmonic (in phase)");
     plot.title(format!(
-        "Demodulated probe-frame response: detuning = {:.3}, Gaussian μ = {:.3}, σ = {:.3}, |kv| ≤ {:.3} ({} samples)",
-        atom.delta,
-        atom.kv,
-        params.kv_sigma,
-        params.kv_window_half_width,
+        "Demodulated probe-frame response: detuning = {:.3} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
+        to_mhz(atom.delta),
+        to_mhz(atom.kv),
+        to_mhz(params.kv_sigma),
+        to_mhz(params.kv_window_half_width),
         params.kv_samples,
     ));
-    plot.xlabel("Delay τ (time)");
+    plot.xlabel("Delay τ (µs)");
     plot.ylabel("Demodulated σy response to σz / 2");
     plot.xlim(
         0.0,
@@ -264,20 +265,25 @@ pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
             .iter()
             .map(|value| value.norm())
             .collect();
-        plot.plot(&spectrum.angular_frequencies, &magnitude)
-            .label(label);
+        let frequencies_mhz: Vec<_> = spectrum
+            .angular_frequencies
+            .iter()
+            .copied()
+            .map(to_mhz)
+            .collect();
+        plot.plot(&frequencies_mhz, &magnitude).label(label);
     }
     plot.title(format!(
-        "Demodulated frequency response: detuning = {:.3}, Gaussian μ = {:.3}, σ = {:.3}, |kv| ≤ {:.3} ({} samples)",
-        atom.delta,
-        atom.kv,
-        params.kv_sigma,
-        params.kv_window_half_width,
+        "Demodulated frequency response: detuning = {:.3} MHz, Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
+        to_mhz(atom.delta),
+        to_mhz(atom.kv),
+        to_mhz(params.kv_sigma),
+        to_mhz(params.kv_window_half_width),
         params.kv_samples,
     ));
-    plot.xlabel("Angular frequency (rad / time)");
+    plot.xlabel("Frequency (MHz)");
     plot.ylabel("Fourier magnitude of demodulated response");
-    plot.xlim(0.0, PI / step);
+    plot.xlim(0.0, to_mhz(PI / step));
     //plot.yscale(AxisScale::Log10);
     Ok(plot)
 }

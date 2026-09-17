@@ -7,6 +7,7 @@ use rayon::prelude::*;
 
 use super::{Params, velocity};
 use crate::mts::{self, MtsCurves};
+use crate::units::to_mhz;
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     let velocity = velocity::control_group(
@@ -100,10 +101,10 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
         &params.mts,
         &output,
         format!(
-            "Probe frame: Gaussian μ = {:.3}, σ = {:.3}, |kv| ≤ {:.3} ({} samples)",
-            params.mts.hamiltonian.kv,
-            params.kv_sigma,
-            params.kv_window_half_width,
+            "Probe frame: Gaussian μ = {:.3} MHz, σ = {:.3} MHz, |kv| ≤ {:.3} MHz ({} samples)",
+            to_mhz(params.mts.hamiltonian.kv),
+            to_mhz(params.kv_sigma),
+            to_mhz(params.kv_window_half_width),
             params.kv_samples,
         ),
     ))

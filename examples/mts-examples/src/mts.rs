@@ -4,6 +4,8 @@ use atomic_clocks::twolevel::{Decay, Vec3};
 use atomic_clocks::vapourcell::{DemodOutput, Frame, HamiltonianParams, MtsParams, compute_demod};
 use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 
+use crate::units::{frequency_slider, to_mhz};
+
 /// Scalar curves derived from one combined demodulation output for plotting.
 pub(super) struct MtsCurves {
     pub hz: Vec<f64>,
@@ -55,7 +57,7 @@ pub(super) fn control_groups<'a>(
         SliderGroup::new(
             "Scan and sampling",
             [
-                Slider::new("Detuning half-range", &mut params.solver.hz_lim, 0.1..=40.0),
+                frequency_slider("Detuning half-range", &mut params.solver.hz_lim, 0.1..=40.0),
                 Slider::new("Detuning samples", &mut params.solver.hz_num, 2..=500),
                 Slider::new("Spatial phase samples", &mut params.solver.kr_n, 1..=21).step_by(2.0),
                 Slider::new(
@@ -78,14 +80,14 @@ pub(super) fn atom_control_groups<'a>(
         SliderGroup::new(
             "Modulation",
             [
-                Slider::new(
+                frequency_slider(
                     "Frequency",
                     &mut hamiltonian.modulation.frequency,
                     0.1..=10.0,
                 )
                 .logarithmic(true),
-                Slider::new("Depth", &mut hamiltonian.modulation.depth, 0.0..=10.0),
-                Slider::new(
+                frequency_slider("Depth", &mut hamiltonian.modulation.depth, 0.0..=10.0),
+                frequency_slider(
                     "Frequency shift",
                     &mut hamiltonian.modulation.shift,
                     -10.0..=10.0,
@@ -95,19 +97,20 @@ pub(super) fn atom_control_groups<'a>(
         SliderGroup::new(
             "Pump, probe and atom",
             [
-                Slider::new("Pump Rabi frequency", &mut hamiltonian.r_pump, 0.0..=10.0),
-                Slider::new("Probe Rabi frequency", &mut hamiltonian.r_prbe, 0.0..=2.0),
-                Slider::new("Detuning offset", &mut hamiltonian.delta, -10.0..=10.0),
-                Slider::new(kv_label, &mut hamiltonian.kv, -50.0..=50.0),
+                frequency_slider("Pump Rabi frequency", &mut hamiltonian.r_pump, 0.0..=10.0),
+                frequency_slider("Probe Rabi frequency", &mut hamiltonian.r_prbe, 0.0..=2.0),
+                frequency_slider("Detuning offset", &mut hamiltonian.delta, -10.0..=10.0),
+                frequency_slider(kv_label, &mut hamiltonian.kv, -50.0..=50.0),
                 Slider::new("Spatial phase (kr)", &mut hamiltonian.kr, -PI..=PI),
             ],
         ),
         SliderGroup::new(
             "Relaxation",
             [
-                Slider::new("Excitation rate", &mut decay.gamma_up, 0.0..=10.0),
-                Slider::new("Decay rate", &mut decay.gamma_down, 0.01..=10.0).logarithmic(true),
-                Slider::new("Dephasing rate", &mut decay.gamma_phi, 0.0..=10.0),
+                frequency_slider("Excitation rate", &mut decay.gamma_up, 0.0..=10.0),
+                frequency_slider("Decay rate", &mut decay.gamma_down, 0.01..=10.0)
+                    .logarithmic(true),
+                frequency_slider("Dephasing rate", &mut decay.gamma_phi, 0.0..=10.0),
             ],
         ),
     ]
@@ -135,16 +138,19 @@ fn plot(params: &MtsParams, frame: Frame) -> AppResult {
 
 pub(super) fn signal_plot(params: &MtsParams, output: &MtsCurves, title: String) -> Plotter {
     let mut plot = Plotter::new();
+    let detunings_mhz: Vec<_> = output.hz.iter().copied().map(to_mhz).collect();
     let minus_amp0: Vec<_> = output.amp0.iter().map(|x| -x).collect();
-    plot.plot(&output.hz, &minus_amp0).label("DC");
-    plot.plot(&output.hz, &output.proj1).label("First harmonic");
-    plot.plot(&output.hz, &output.proj2)
+    plot.plot(&detunings_mhz, &minus_amp0).label("DC");
+    plot.plot(&detunings_mhz, &output.proj1)
+        .label("First harmonic");
+    plot.plot(&detunings_mhz, &output.proj2)
         .label("Second harmonic");
-    plot.plot(&output.hz, &output.proj3).label("Third harmonic");
+    plot.plot(&detunings_mhz, &output.proj3)
+        .label("Third harmonic");
     plot.title(title);
-    plot.xlabel("Detuning relative to offset (rad / time)");
+    plot.xlabel("Detuning relative to offset (MHz)");
     plot.ylabel("Demodulated signal");
-    plot.xlim(-params.solver.hz_lim, params.solver.hz_lim);
+    plot.xlim(to_mhz(-params.solver.hz_lim), to_mhz(params.solver.hz_lim));
     plot
 }
 
