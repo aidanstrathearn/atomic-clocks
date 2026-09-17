@@ -9,10 +9,14 @@ use super::{Params, common_control_groups, velocity};
 use crate::mts::{self, MtsCurves};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
-    let scan = mts::scan_control_group(&mut params.mts.solver);
+    let scan =
+        mts::scan_control_group(&mut params.mts.solver.hz_lim, &mut params.mts.solver.hz_num);
     let common = common_control_groups(
         &mut params.mts.hamiltonian,
         &mut params.mts.decay,
+        &mut params.mts.solver.kr_n,
+        &mut params.mts.solver.steps_per_period,
+        &mut params.mts.solver.n_periods,
         &mut params.kv_sigma,
         &mut params.kv_window_half_width,
         &mut params.kv_samples,

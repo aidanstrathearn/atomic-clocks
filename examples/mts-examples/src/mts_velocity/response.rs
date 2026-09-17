@@ -34,28 +34,18 @@ fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
     });
     let response = SliderGroup::new(
         "Linear response",
-        time_slider.into_iter().chain([
-            Slider::new(
-                "Warmup periods",
-                &mut params.response_warmup_periods,
-                0..=100,
-            ),
-            Slider::new(
-                "Maximum delay (periods)",
-                &mut params.response_delay_periods,
-                1..=20,
-            ),
-            Slider::new("Spatial phase samples", &mut params.mts.solver.kr_n, 1..=21).step_by(2.0),
-            Slider::new(
-                "Steps per period",
-                &mut params.mts.solver.steps_per_period,
-                20..=1_000,
-            ),
-        ]),
+        time_slider.into_iter().chain([Slider::new(
+            "Maximum delay (periods)",
+            &mut params.response_delay_periods,
+            1..=20,
+        )]),
     );
     let common = common_control_groups(
         &mut params.mts.hamiltonian,
         &mut params.mts.decay,
+        &mut params.mts.solver.kr_n,
+        &mut params.mts.solver.steps_per_period,
+        &mut params.mts.solver.n_periods,
         &mut params.kv_sigma,
         &mut params.kv_window_half_width,
         &mut params.kv_samples,
@@ -67,6 +57,12 @@ pub(super) fn response_at_velocity(
     params: &Params,
     kv: f64,
 ) -> Result<LinearResponseOutput, String> {
+    let warmup_periods = params
+        .mts
+        .solver
+        .n_periods
+        .checked_sub(1)
+        .ok_or("MTS period count must be positive")?;
     let atom = HamiltonianParams {
         frame: Frame::Probe,
         kv,
@@ -75,7 +71,7 @@ pub(super) fn response_at_velocity(
     let solver = LinearResponseSolverParams {
         kr_n: params.mts.solver.kr_n,
         steps_per_period: params.mts.solver.steps_per_period,
-        warmup_periods: params.response_warmup_periods,
+        warmup_periods,
         delay_periods: params.response_delay_periods,
     };
     compute_linear_response(

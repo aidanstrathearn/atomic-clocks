@@ -1,5 +1,5 @@
 use atomic_clocks::maths::demodulation::ModulationParams;
-use atomic_clocks::vapourcell::{DemodOutput, MtsParams, MtsSolverParams};
+use atomic_clocks::vapourcell::{DemodOutput, MtsParams};
 use myplotlib::{Plotter, Slider, SliderGroup};
 
 use crate::units::{frequency_slider, to_mhz};
@@ -38,15 +38,15 @@ impl From<DemodOutput> for MtsCurves {
     }
 }
 
-pub(super) fn scan_control_group(params: &mut MtsSolverParams) -> SliderGroup<'_> {
+pub(super) fn scan_control_group<'a>(
+    hz_lim: &'a mut f64,
+    hz_num: &'a mut usize,
+) -> SliderGroup<'a> {
     SliderGroup::new(
-        "Scan and sampling",
+        "Scan",
         [
-            frequency_slider("Detuning half-range", &mut params.hz_lim, 0.1..=60.0),
-            Slider::new("Detuning samples", &mut params.hz_num, 2..=500),
-            Slider::new("Spatial phase samples", &mut params.kr_n, 1..=21).step_by(2.0),
-            Slider::new("Steps per period", &mut params.steps_per_period, 20..=1_000),
-            Slider::new("Periods", &mut params.n_periods, 1..=20),
+            frequency_slider("Detuning half-range", hz_lim, 0.1..=60.0),
+            Slider::new("Detuning samples", hz_num, 2..=500),
         ],
     )
 }

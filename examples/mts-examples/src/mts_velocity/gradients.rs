@@ -19,18 +19,14 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
             )
             .logarithmic(true),
             Slider::new("Maximum harmonic", &mut params.gradient_harmonics, 1..=50),
-            Slider::new("Spatial phase samples", &mut params.mts.solver.kr_n, 1..=21).step_by(2.0),
-            Slider::new(
-                "Steps per period",
-                &mut params.mts.solver.steps_per_period,
-                20..=1_000,
-            ),
-            Slider::new("Periods", &mut params.mts.solver.n_periods, 1..=20),
         ],
     );
     let common = common_control_groups(
         &mut params.mts.hamiltonian,
         &mut params.mts.decay,
+        &mut params.mts.solver.kr_n,
+        &mut params.mts.solver.steps_per_period,
+        &mut params.mts.solver.n_periods,
         &mut params.kv_sigma,
         &mut params.kv_window_half_width,
         &mut params.kv_samples,

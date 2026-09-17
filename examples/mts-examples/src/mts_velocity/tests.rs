@@ -63,7 +63,6 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
                     },
                     ..Default::default()
                 },
-                response_warmup_periods: 6,
                 response_delay_periods: 6,
                 ..Params::default()
             };
@@ -263,7 +262,6 @@ fn harmonic_gradients_validate_the_difference_and_sampling() {
 #[test]
 fn weighted_response_matches_serial_kernels() {
     let params = Params {
-        response_warmup_periods: 1,
         response_delay_periods: 1,
         ..small_params()
     };
@@ -383,7 +381,6 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
         kv_sigma: 2.0,
         kv_window_half_width: 1.5,
         kv_samples: 5,
-        response_warmup_periods: 6,
         response_delay_periods: 6,
         ..Params::default()
     };
