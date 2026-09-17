@@ -9,8 +9,7 @@ use atomic_clocks::vapourcell::{
 use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
-use super::{Params, velocity};
-use crate::mts;
+use super::{Params, common_control_groups, velocity};
 use crate::units::to_mhz;
 
 const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
@@ -24,9 +23,6 @@ pub(super) fn demodulated_controls(params: &mut Params) -> SliderGrid<'_> {
 }
 
 fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
-    params.mts.hamiltonian.delta = 0.0;
-    params.mts.hamiltonian.kr = 0.0;
-    params.mts.decay.gamma_up = 0.0;
     let time_step = 1.0 / params.mts.solver.steps_per_period as f64;
     let time_slider = show_time.then(|| {
         Slider::new(
@@ -57,24 +53,14 @@ fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
             ),
         ]),
     );
-    let velocity = velocity::control_group(
-        &mut params.mts.hamiltonian.kv,
+    let common = common_control_groups(
+        &mut params.mts.hamiltonian,
+        &mut params.mts.decay,
         &mut params.kv_sigma,
         &mut params.kv_window_half_width,
         &mut params.kv_samples,
     );
-    SliderGrid::new(
-        5,
-        mts::atom_control_groups(
-            &mut params.mts.hamiltonian.modulation,
-            &mut params.mts.hamiltonian.r_pump,
-            &mut params.mts.hamiltonian.r_prbe,
-            &mut params.mts.decay.gamma_down,
-            &mut params.mts.decay.gamma_phi,
-        )
-        .into_iter()
-        .chain([response, velocity]),
-    )
+    SliderGrid::new(5, common.into_iter().chain([response]))
 }
 
 pub(super) fn response_at_velocity(

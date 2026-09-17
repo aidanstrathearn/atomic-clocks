@@ -5,14 +5,10 @@ use atomic_clocks::vapourcell::{Frame, HamiltonianParams, MtsParams, compute_dem
 use myplotlib::{AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
-use super::{Params, velocity};
-use crate::mts;
+use super::{Params, common_control_groups, velocity};
 use crate::units::{angular_gradient_to_per_mhz, frequency_slider};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
-    params.mts.hamiltonian.delta = 0.0;
-    params.mts.hamiltonian.kr = 0.0;
-    params.mts.decay.gamma_up = 0.0;
     let gradient = SliderGroup::new(
         "Harmonic gradient",
         [
@@ -32,24 +28,14 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
             Slider::new("Periods", &mut params.mts.solver.n_periods, 1..=20),
         ],
     );
-    let velocity = velocity::control_group(
-        &mut params.mts.hamiltonian.kv,
+    let common = common_control_groups(
+        &mut params.mts.hamiltonian,
+        &mut params.mts.decay,
         &mut params.kv_sigma,
         &mut params.kv_window_half_width,
         &mut params.kv_samples,
     );
-    SliderGrid::new(
-        5,
-        mts::atom_control_groups(
-            &mut params.mts.hamiltonian.modulation,
-            &mut params.mts.hamiltonian.r_pump,
-            &mut params.mts.hamiltonian.r_prbe,
-            &mut params.mts.decay.gamma_down,
-            &mut params.mts.decay.gamma_phi,
-        )
-        .into_iter()
-        .chain([gradient, velocity]),
-    )
+    SliderGrid::new(5, common.into_iter().chain([gradient]))
 }
 
 pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {

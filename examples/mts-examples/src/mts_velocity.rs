@@ -3,8 +3,11 @@ mod probe;
 mod response;
 mod velocity;
 
-use atomic_clocks::vapourcell::{LinearResponseSolverParams, MtsParams};
-use myplotlib::{AppDefinition, ViewOption};
+use atomic_clocks::twolevel::Decay;
+use atomic_clocks::vapourcell::{HamiltonianParams, LinearResponseSolverParams, MtsParams};
+use myplotlib::{AppDefinition, SliderGroup, ViewOption};
+
+use crate::mts;
 
 pub(crate) struct Params {
     // In this example, `mts.hamiltonian.kv` is the Gaussian mean. Each solver
@@ -34,6 +37,34 @@ impl Default for Params {
             response_delay_periods: LinearResponseSolverParams::default().delay_periods,
         }
     }
+}
+
+pub(super) fn common_control_groups<'a>(
+    hamiltonian: &'a mut HamiltonianParams,
+    decay: &'a mut Decay,
+    kv_sigma: &'a mut f64,
+    kv_window_half_width: &'a mut f64,
+    kv_samples: &'a mut usize,
+) -> [SliderGroup<'a>; 3] {
+    hamiltonian.delta = 0.0;
+    hamiltonian.kr = 0.0;
+    decay.gamma_up = 0.0;
+
+    let [modulation, rates] = mts::atom_control_groups(
+        &mut hamiltonian.modulation,
+        &mut hamiltonian.r_pump,
+        &mut hamiltonian.r_prbe,
+        &mut decay.gamma_down,
+        &mut decay.gamma_phi,
+    );
+    let velocity = velocity::control_group(
+        &mut hamiltonian.kv,
+        kv_sigma,
+        kv_window_half_width,
+        kv_samples,
+    );
+
+    [modulation, rates, velocity]
 }
 
 pub(crate) fn definition() -> AppDefinition<Params> {

@@ -5,28 +5,19 @@ use atomic_clocks::vapourcell::{DemodOutput, Frame, HamiltonianParams, MtsParams
 use myplotlib::{AppResult, SliderGrid};
 use rayon::prelude::*;
 
-use super::{Params, velocity};
+use super::{Params, common_control_groups, velocity};
 use crate::mts::{self, MtsCurves};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
-    params.mts.hamiltonian.delta = 0.0;
-    params.mts.hamiltonian.kr = 0.0;
-    params.mts.decay.gamma_up = 0.0;
-    let atom = mts::atom_control_groups(
-        &mut params.mts.hamiltonian.modulation,
-        &mut params.mts.hamiltonian.r_pump,
-        &mut params.mts.hamiltonian.r_prbe,
-        &mut params.mts.decay.gamma_down,
-        &mut params.mts.decay.gamma_phi,
-    );
     let scan = mts::scan_control_group(&mut params.mts.solver);
-    let velocity = velocity::control_group(
-        &mut params.mts.hamiltonian.kv,
+    let common = common_control_groups(
+        &mut params.mts.hamiltonian,
+        &mut params.mts.decay,
         &mut params.kv_sigma,
         &mut params.kv_window_half_width,
         &mut params.kv_samples,
     );
-    SliderGrid::new(5, atom.into_iter().chain([scan, velocity]))
+    SliderGrid::new(5, common.into_iter().chain([scan]))
 }
 
 fn scale_demod_output(output: &mut DemodOutput, weight: f64) {
