@@ -3,8 +3,7 @@ use std::f64::consts::PI;
 use atomic_clocks::maths::fourier_transform;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    Frame, HamiltonianParams, LinearResponseOutput, LinearResponseSolverParams,
-    compute_linear_response,
+    LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
 };
 use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
@@ -63,11 +62,7 @@ pub(super) fn response_at_velocity(
         .n_periods
         .checked_sub(1)
         .ok_or("MTS period count must be positive")?;
-    let atom = HamiltonianParams {
-        frame: Frame::Probe,
-        kv,
-        ..params.mts.hamiltonian
-    };
+    let atom = params.probe_hamiltonian(kv);
     let solver = LinearResponseSolverParams {
         kr_n: params.mts.solver.kr_n,
         steps_per_period: params.mts.solver.steps_per_period,

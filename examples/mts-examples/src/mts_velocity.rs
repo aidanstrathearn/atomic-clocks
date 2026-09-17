@@ -4,14 +4,12 @@ mod response;
 mod velocity;
 
 use atomic_clocks::twolevel::Decay;
-use atomic_clocks::vapourcell::{HamiltonianParams, LinearResponseSolverParams, MtsParams};
+use atomic_clocks::vapourcell::{Frame, HamiltonianParams, LinearResponseSolverParams, MtsParams};
 use myplotlib::{AppDefinition, Slider, SliderGroup, ViewOption};
 
 use crate::mts;
 
 pub(crate) struct Params {
-    // In this example, `mts.hamiltonian.kv` is the Gaussian mean. Each solver
-    // call replaces it with a quadrature node inside the window around kv = 0.
     pub(super) mts: MtsParams,
     pub(super) kv_sigma: f64,
     pub(super) kv_window_half_width: f64,
@@ -37,6 +35,21 @@ impl Default for Params {
     }
 }
 
+impl Params {
+    /// Returns the probe-frame Hamiltonian in coordinates centred on the
+    /// velocity class selected by the carrier shift.
+    pub(super) fn probe_hamiltonian(&self, kv: f64) -> HamiltonianParams {
+        let mut modulation = self.mts.hamiltonian.modulation;
+        modulation.shift = 0.0;
+        HamiltonianParams {
+            modulation,
+            kv,
+            frame: Frame::Probe,
+            ..self.mts.hamiltonian
+        }
+    }
+}
+
 pub(super) fn common_control_groups<'a>(
     hamiltonian: &'a mut HamiltonianParams,
     decay: &'a mut Decay,
@@ -48,6 +61,7 @@ pub(super) fn common_control_groups<'a>(
     kv_samples: &'a mut usize,
 ) -> [SliderGroup<'a>; 4] {
     hamiltonian.delta = 0.0;
+    hamiltonian.kv = 0.0;
     hamiltonian.kr = 0.0;
     decay.gamma_up = 0.0;
 
@@ -58,12 +72,7 @@ pub(super) fn common_control_groups<'a>(
         &mut decay.gamma_down,
         &mut decay.gamma_phi,
     );
-    let velocity = velocity::control_group(
-        &mut hamiltonian.kv,
-        kv_sigma,
-        kv_window_half_width,
-        kv_samples,
-    );
+    let velocity = velocity::control_group(kv_sigma, kv_window_half_width, kv_samples);
     let solver = SliderGroup::new(
         "Solver",
         [

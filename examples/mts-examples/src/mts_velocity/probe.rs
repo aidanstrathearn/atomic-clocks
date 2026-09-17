@@ -1,7 +1,7 @@
 use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::twolevel::Vec3;
-use atomic_clocks::vapourcell::{DemodOutput, Frame, HamiltonianParams, MtsParams, compute_demod};
+use atomic_clocks::vapourcell::{DemodOutput, HamiltonianParams, MtsParams, compute_demod};
 use myplotlib::{AppResult, SliderGrid};
 use rayon::prelude::*;
 
@@ -62,10 +62,7 @@ fn add_demod_output(sum: &mut DemodOutput, output: DemodOutput, weight: f64) -> 
 pub(super) fn velocity_average(params: &Params) -> Result<MtsCurves, String> {
     let samples = velocity::velocity_samples(params)?;
     let probe = MtsParams {
-        hamiltonian: HamiltonianParams {
-            frame: Frame::Probe,
-            ..params.mts.hamiltonian
-        },
+        hamiltonian: params.probe_hamiltonian(0.0),
         ..params.mts
     };
 

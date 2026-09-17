@@ -82,7 +82,11 @@ pub(super) fn atom_control_groups<'a>(
 
 pub(super) fn signal_plot(params: &MtsParams, output: &MtsCurves) -> Plotter {
     let mut plot = Plotter::new();
-    let detunings_mhz: Vec<_> = output.hz.iter().copied().map(to_mhz).collect();
+    let detunings_mhz: Vec<_> = output
+        .hz
+        .iter()
+        .map(|&hz| to_mhz(display_detuning(params, hz)))
+        .collect();
     let minus_amp0: Vec<_> = output.amp0.iter().map(|x| -x).collect();
     plot.plot(&detunings_mhz, &minus_amp0).label("DC");
     plot.plot(&detunings_mhz, &output.proj1)
@@ -93,6 +97,13 @@ pub(super) fn signal_plot(params: &MtsParams, output: &MtsCurves) -> Plotter {
         .label("Third harmonic");
     plot.xlabel("Detuning (MHz)");
     plot.ylabel("Demodulated signal");
-    plot.xlim(to_mhz(-params.solver.hz_lim), to_mhz(params.solver.hz_lim));
+    plot.xlim(
+        to_mhz(display_detuning(params, -params.solver.hz_lim)),
+        to_mhz(display_detuning(params, params.solver.hz_lim)),
+    );
     plot
+}
+
+pub(super) fn display_detuning(params: &MtsParams, detuning: f64) -> f64 {
+    detuning + params.hamiltonian.modulation.shift / 2.0
 }

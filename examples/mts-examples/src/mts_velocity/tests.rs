@@ -22,11 +22,7 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
 fn demod_at_velocity(params: &Params, kv: f64) -> DemodOutput {
     compute_demod(
         &MtsParams {
-            hamiltonian: HamiltonianParams {
-                frame: Frame::Probe,
-                kv,
-                ..params.mts.hamiltonian
-            },
+            hamiltonian: params.probe_hamiltonian(kv),
             ..params.mts
         },
         Vec3 {
@@ -121,7 +117,6 @@ fn small_params() -> Params {
         mts: MtsParams {
             hamiltonian: HamiltonianParams {
                 frame: Frame::Pump,
-                kv: 0.75,
                 ..HamiltonianParams::default()
             },
             solver: MtsSolverParams {
@@ -155,7 +150,7 @@ fn gaussian_quadrature_uses_a_fixed_zero_centered_window() {
     for sample in samples {
         assert_close(
             sample.weight,
-            normalised_gaussian(sample.kv, 0.75, 2.0),
+            normalised_gaussian(sample.kv, 0.0, 2.0),
             1e-15,
         );
     }
@@ -291,10 +286,40 @@ fn weighted_response_matches_serial_kernels() {
 }
 
 #[test]
-fn shifted_gaussian_matches_the_finite_frequency_shift_coordinates() {
+fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
     let shift = 1.4;
     let relative_delta = 0.3;
     let sigma = 2.7;
+    let params = Params {
+        mts: MtsParams {
+            hamiltonian: HamiltonianParams {
+                modulation: ModulationParams {
+                    shift,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        kv_sigma: sigma,
+        kv_window_half_width: 1.5,
+        kv_samples: 3,
+        ..Default::default()
+    };
+    assert_eq!(params.probe_hamiltonian(0.0).modulation.shift, 0.0);
+    assert_close(
+        crate::mts::display_detuning(&params.mts, relative_delta),
+        relative_delta + shift / 2.0,
+        1e-15,
+    );
+    for sample in velocity_samples(&params).unwrap() {
+        assert_close(
+            sample.weight,
+            normalised_gaussian(sample.kv, shift / 2.0, sigma),
+            1e-15,
+        );
+    }
+
     let solver = MtsSolverParams {
         hz_num: 5,
         kr_n: 3,

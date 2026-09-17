@@ -1,7 +1,7 @@
 use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::twolevel::Vec3;
-use atomic_clocks::vapourcell::{Frame, HamiltonianParams, MtsParams, compute_demod_harmonics};
+use atomic_clocks::vapourcell::{HamiltonianParams, MtsParams, compute_demod_harmonics};
 use myplotlib::{AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
@@ -60,10 +60,8 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
                 compute_demod_harmonics(
                     &MtsParams {
                         hamiltonian: HamiltonianParams {
-                            frame: Frame::Probe,
                             delta: params.mts.hamiltonian.delta + offset,
-                            kv: sample.kv,
-                            ..params.mts.hamiltonian
+                            ..params.probe_hamiltonian(sample.kv)
                         },
                         ..params.mts
                     },
