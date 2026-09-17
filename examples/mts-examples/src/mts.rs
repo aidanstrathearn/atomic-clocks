@@ -57,7 +57,7 @@ pub(super) fn atom_control_groups<'a>(
     r_prbe: &'a mut f64,
     gamma_down: &'a mut f64,
     gamma_phi: &'a mut f64,
-) -> [SliderGroup<'a>; 3] {
+) -> [SliderGroup<'a>; 2] {
     [
         SliderGroup::new(
             "Modulation",
@@ -65,21 +65,16 @@ pub(super) fn atom_control_groups<'a>(
                 frequency_slider("Frequency", &mut modulation.frequency, 0.1..=10.0)
                     .logarithmic(true),
                 frequency_slider("Depth", &mut modulation.depth, 0.0..=10.0),
-                frequency_slider("Frequency shift", &mut modulation.shift, -10.0..=10.0),
+                frequency_slider("Shift", &mut modulation.shift, -10.0..=10.0),
             ],
         ),
         SliderGroup::new(
-            "Pump, probe and atom",
+            "Rates",
             [
-                frequency_slider("Pump Rabi frequency", r_pump, 0.0..=10.0),
-                frequency_slider("Probe Rabi frequency", r_prbe, 0.0..=2.0),
-            ],
-        ),
-        SliderGroup::new(
-            "Relaxation",
-            [
-                frequency_slider("Decay rate", gamma_down, 0.01..=10.0).logarithmic(true),
-                frequency_slider("Dephasing rate", gamma_phi, 0.0..=10.0),
+                frequency_slider("Pump Rabi", r_pump, 0.0..=10.0),
+                frequency_slider("Probe Rabi", r_prbe, 0.0..=2.0),
+                frequency_slider("Decay", gamma_down, 0.01..=10.0).logarithmic(true),
+                frequency_slider("Dephasing", gamma_phi, 0.0..=10.0),
             ],
         ),
     ]
