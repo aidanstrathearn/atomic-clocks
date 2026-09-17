@@ -1,5 +1,4 @@
 mod mts;
-#[path = "mts-velocity.rs"]
 mod mts_velocity;
 
 fn main() -> myplotlib::Result {
