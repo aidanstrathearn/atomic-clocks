@@ -10,6 +10,8 @@ use crate::mts;
 use crate::units::{angular_gradient_to_per_mhz, frequency_slider, to_mhz};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
+    params.mts.hamiltonian.kr = 0.0;
+    params.mts.decay.gamma_up = 0.0;
     let gradient = SliderGroup::new(
         "Harmonic gradient",
         [
@@ -30,6 +32,7 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
         ],
     );
     let velocity = velocity::control_group(
+        &mut params.mts.hamiltonian.kv,
         &mut params.kv_sigma,
         &mut params.kv_window_half_width,
         &mut params.kv_samples,
@@ -37,9 +40,12 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     SliderGrid::new(
         5,
         mts::atom_control_groups(
-            &mut params.mts.hamiltonian,
-            &mut params.mts.decay,
-            "Gaussian mean (kv)",
+            &mut params.mts.hamiltonian.modulation,
+            &mut params.mts.hamiltonian.r_pump,
+            &mut params.mts.hamiltonian.r_prbe,
+            &mut params.mts.hamiltonian.delta,
+            &mut params.mts.decay.gamma_down,
+            &mut params.mts.decay.gamma_phi,
         )
         .into_iter()
         .chain([gradient, velocity]),

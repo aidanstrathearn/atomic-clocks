@@ -11,6 +11,7 @@ pub(super) struct VelocitySample {
 }
 
 pub(super) fn control_group<'a>(
+    kv_mean: &'a mut f64,
     kv_sigma: &'a mut f64,
     kv_window_half_width: &'a mut f64,
     kv_samples: &'a mut usize,
@@ -18,6 +19,7 @@ pub(super) fn control_group<'a>(
     SliderGroup::new(
         "Truncated Gaussian velocity distribution",
         [
+            frequency_slider("Gaussian mean (kv)", kv_mean, -50.0..=50.0),
             frequency_slider("Gaussian sigma (kv)", kv_sigma, 0.1..=3000.0).logarithmic(true),
             frequency_slider(
                 "Integration half-width around kv = 0",

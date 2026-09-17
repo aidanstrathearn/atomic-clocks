@@ -10,17 +10,24 @@ use crate::mts::{self, MtsCurves};
 use crate::units::to_mhz;
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
+    params.mts.hamiltonian.kr = 0.0;
+    params.mts.decay.gamma_up = 0.0;
+    let atom = mts::atom_control_groups(
+        &mut params.mts.hamiltonian.modulation,
+        &mut params.mts.hamiltonian.r_pump,
+        &mut params.mts.hamiltonian.r_prbe,
+        &mut params.mts.hamiltonian.delta,
+        &mut params.mts.decay.gamma_down,
+        &mut params.mts.decay.gamma_phi,
+    );
+    let scan = mts::scan_control_group(&mut params.mts.solver);
     let velocity = velocity::control_group(
+        &mut params.mts.hamiltonian.kv,
         &mut params.kv_sigma,
         &mut params.kv_window_half_width,
         &mut params.kv_samples,
     );
-    SliderGrid::new(
-        5,
-        mts::control_groups(&mut params.mts, "Gaussian mean (kv)")
-            .into_iter()
-            .chain([velocity]),
-    )
+    SliderGrid::new(5, atom.into_iter().chain([scan, velocity]))
 }
 
 fn scale_demod_output(output: &mut DemodOutput, weight: f64) {

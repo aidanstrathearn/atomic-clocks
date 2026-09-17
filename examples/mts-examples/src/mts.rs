@@ -1,7 +1,5 @@
-use std::f64::consts::PI;
-
-use atomic_clocks::twolevel::Decay;
-use atomic_clocks::vapourcell::{DemodOutput, HamiltonianParams, MtsParams};
+use atomic_clocks::maths::demodulation::ModulationParams;
+use atomic_clocks::vapourcell::{DemodOutput, MtsParams, MtsSolverParams};
 use myplotlib::{Plotter, Slider, SliderGroup};
 
 use crate::units::{frequency_slider, to_mhz};
@@ -40,73 +38,50 @@ impl From<DemodOutput> for MtsCurves {
     }
 }
 
-pub(super) fn control_groups<'a>(
-    params: &'a mut MtsParams,
-    kv_label: &'static str,
-) -> [SliderGroup<'a>; 4] {
-    let [modulation, atom, relaxation] =
-        atom_control_groups(&mut params.hamiltonian, &mut params.decay, kv_label);
-    [
-        modulation,
-        atom,
-        relaxation,
-        SliderGroup::new(
-            "Scan and sampling",
-            [
-                frequency_slider("Detuning half-range", &mut params.solver.hz_lim, 0.1..=60.0),
-                Slider::new("Detuning samples", &mut params.solver.hz_num, 2..=500),
-                Slider::new("Spatial phase samples", &mut params.solver.kr_n, 1..=21).step_by(2.0),
-                Slider::new(
-                    "Steps per period",
-                    &mut params.solver.steps_per_period,
-                    20..=1_000,
-                ),
-                Slider::new("Periods", &mut params.solver.n_periods, 1..=20),
-            ],
-        ),
-    ]
+pub(super) fn scan_control_group(params: &mut MtsSolverParams) -> SliderGroup<'_> {
+    SliderGroup::new(
+        "Scan and sampling",
+        [
+            frequency_slider("Detuning half-range", &mut params.hz_lim, 0.1..=60.0),
+            Slider::new("Detuning samples", &mut params.hz_num, 2..=500),
+            Slider::new("Spatial phase samples", &mut params.kr_n, 1..=21).step_by(2.0),
+            Slider::new("Steps per period", &mut params.steps_per_period, 20..=1_000),
+            Slider::new("Periods", &mut params.n_periods, 1..=20),
+        ],
+    )
 }
 
 pub(super) fn atom_control_groups<'a>(
-    hamiltonian: &'a mut HamiltonianParams,
-    decay: &'a mut Decay,
-    kv_label: &'static str,
+    modulation: &'a mut ModulationParams,
+    r_pump: &'a mut f64,
+    r_prbe: &'a mut f64,
+    delta: &'a mut f64,
+    gamma_down: &'a mut f64,
+    gamma_phi: &'a mut f64,
 ) -> [SliderGroup<'a>; 3] {
     [
         SliderGroup::new(
             "Modulation",
             [
-                frequency_slider(
-                    "Frequency",
-                    &mut hamiltonian.modulation.frequency,
-                    0.1..=10.0,
-                )
-                .logarithmic(true),
-                frequency_slider("Depth", &mut hamiltonian.modulation.depth, 0.0..=10.0),
-                frequency_slider(
-                    "Frequency shift",
-                    &mut hamiltonian.modulation.shift,
-                    -10.0..=10.0,
-                ),
+                frequency_slider("Frequency", &mut modulation.frequency, 0.1..=10.0)
+                    .logarithmic(true),
+                frequency_slider("Depth", &mut modulation.depth, 0.0..=10.0),
+                frequency_slider("Frequency shift", &mut modulation.shift, -10.0..=10.0),
             ],
         ),
         SliderGroup::new(
             "Pump, probe and atom",
             [
-                frequency_slider("Pump Rabi frequency", &mut hamiltonian.r_pump, 0.0..=10.0),
-                frequency_slider("Probe Rabi frequency", &mut hamiltonian.r_prbe, 0.0..=2.0),
-                frequency_slider("Detuning offset", &mut hamiltonian.delta, -10.0..=10.0),
-                frequency_slider(kv_label, &mut hamiltonian.kv, -50.0..=50.0),
-                Slider::new("Spatial phase (kr)", &mut hamiltonian.kr, -PI..=PI),
+                frequency_slider("Pump Rabi frequency", r_pump, 0.0..=10.0),
+                frequency_slider("Probe Rabi frequency", r_prbe, 0.0..=2.0),
+                frequency_slider("Detuning offset", delta, -10.0..=10.0),
             ],
         ),
         SliderGroup::new(
             "Relaxation",
             [
-                frequency_slider("Excitation rate", &mut decay.gamma_up, 0.0..=10.0),
-                frequency_slider("Decay rate", &mut decay.gamma_down, 0.01..=10.0)
-                    .logarithmic(true),
-                frequency_slider("Dephasing rate", &mut decay.gamma_phi, 0.0..=10.0),
+                frequency_slider("Decay rate", gamma_down, 0.01..=10.0).logarithmic(true),
+                frequency_slider("Dephasing rate", gamma_phi, 0.0..=10.0),
             ],
         ),
     ]
