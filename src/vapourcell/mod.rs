@@ -6,4 +6,4 @@ pub use hamiltonian::{Frame, HamiltonianParams};
 pub use linear_response::{
     LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
 };
-pub use mts::{DemodOutput, MtsParams, MtsSolverParams, compute_demod};
+pub use mts::{DemodOutput, MtsParams, MtsSolverParams, compute_demod, compute_demod_harmonics};

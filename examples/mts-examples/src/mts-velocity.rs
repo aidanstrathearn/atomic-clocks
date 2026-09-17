@@ -4,9 +4,9 @@ use atomic_clocks::maths::{fourier_transform, normalised_gaussian};
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
     DemodOutput, Frame, HamiltonianParams, LinearResponseOutput, LinearResponseSolverParams,
-    MtsParams, compute_demod, compute_linear_response,
+    MtsParams, compute_demod, compute_demod_harmonics, compute_linear_response,
 };
-use myplotlib::{AppDefinition, AppResult, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
+use myplotlib::{AppDefinition, AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup, ViewOption};
 use rayon::prelude::*;
 
 use crate::mts::{self, MtsCurves};
@@ -20,6 +20,8 @@ pub(crate) struct Params {
     kv_sigma: f64,
     kv_window_half_width: f64,
     kv_samples: usize,
+    gradient_epsilon: f64,
+    gradient_harmonics: usize,
     response_time_fraction: f64,
     response_warmup_periods: usize,
     response_delay_periods: usize,
@@ -32,6 +34,8 @@ impl Default for Params {
             kv_sigma: 10.0,
             kv_window_half_width: 5.0,
             kv_samples: 21,
+            gradient_epsilon: 1e-3,
+            gradient_harmonics: 10,
             response_time_fraction: 0.0,
             response_warmup_periods: LinearResponseSolverParams::default().warmup_periods,
             response_delay_periods: LinearResponseSolverParams::default().delay_periods,
@@ -193,6 +197,125 @@ fn plot(params: &mut Params) -> AppResult {
             params.kv_samples,
         ),
     ))
+}
+
+fn harmonic_gradient_controls(params: &mut Params) -> SliderGrid<'_> {
+    let gradient = SliderGroup::new(
+        "Harmonic gradient",
+        [
+            Slider::new(
+                "Finite-difference epsilon",
+                &mut params.gradient_epsilon,
+                1e-6..=0.1,
+            )
+            .logarithmic(true),
+            Slider::new("Maximum harmonic", &mut params.gradient_harmonics, 1..=50),
+            Slider::new("Spatial phase samples", &mut params.mts.solver.kr_n, 1..=20),
+            Slider::new(
+                "Steps per period",
+                &mut params.mts.solver.steps_per_period,
+                20..=1_000,
+            ),
+            Slider::new("Periods", &mut params.mts.solver.n_periods, 1..=20),
+        ],
+    );
+    let velocity = velocity_control_group(
+        &mut params.kv_sigma,
+        &mut params.kv_window_half_width,
+        &mut params.kv_samples,
+    );
+    SliderGrid::new(
+        5,
+        mts::atom_control_groups(
+            &mut params.mts.hamiltonian,
+            &mut params.mts.decay,
+            "Gaussian mean (kv)",
+        )
+        .into_iter()
+        .chain([gradient, velocity]),
+    )
+}
+
+fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
+    if !params.gradient_epsilon.is_finite() || params.gradient_epsilon <= 0.0 {
+        return Err("finite-difference epsilon must be positive and finite".to_string());
+    }
+    if params.gradient_harmonics == 0 {
+        return Err("maximum harmonic must be positive".to_string());
+    }
+    if params.gradient_harmonics > params.mts.solver.steps_per_period / 2 {
+        return Err(format!(
+            "harmonic {} exceeds the Nyquist limit for {} steps per period",
+            params.gradient_harmonics, params.mts.solver.steps_per_period
+        ));
+    }
+
+    let samples = velocity_samples(params)?;
+    let harmonics: Vec<_> = (1..=params.gradient_harmonics).collect();
+    let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
+
+    // Collect in sample order so the weighted sum is independent of Rayon scheduling.
+    let outputs: Result<Vec<_>, String> = samples
+        .into_par_iter()
+        .map(|sample| {
+            let at_offset = |offset| {
+                compute_demod_harmonics(
+                    &MtsParams {
+                        hamiltonian: HamiltonianParams {
+                            frame: Frame::Probe,
+                            delta: params.mts.hamiltonian.delta + offset,
+                            kv: sample.kv,
+                            ..params.mts.hamiltonian
+                        },
+                        ..params.mts
+                    },
+                    observable,
+                    &harmonics,
+                )
+            };
+            Ok((
+                sample.weight,
+                at_offset(-params.gradient_epsilon)?,
+                at_offset(params.gradient_epsilon)?,
+            ))
+        })
+        .collect();
+
+    let scale = 1.0 / (2.0 * params.gradient_epsilon);
+    let mut gradients = vec![0.0; harmonics.len()];
+    for (weight, below, above) in outputs? {
+        for ((gradient, below), above) in gradients.iter_mut().zip(below).zip(above) {
+            *gradient += weight * (above.in_phase - below.in_phase) * scale;
+        }
+    }
+    Ok(gradients)
+}
+
+fn harmonic_gradient_plot(params: &mut Params) -> AppResult {
+    let magnitudes: Vec<_> = harmonic_gradients(params)?
+        .into_iter()
+        .map(f64::abs)
+        .collect();
+    let harmonics: Vec<_> = (1..=params.gradient_harmonics)
+        .map(|harmonic| harmonic as f64)
+        .collect();
+
+    let mut plot = Plotter::new();
+    plot.plot(&harmonics, &magnitudes).label("|dI/dΔ|");
+    plot.title(format!(
+        "Velocity-averaged harmonic gradients at relative detuning 0: Δ = {:.3}, ε = {:.2e}, Gaussian μ = {:.3}, σ = {:.3}, |kv| ≤ {:.3} ({} samples)",
+        params.mts.hamiltonian.delta,
+        params.gradient_epsilon,
+        params.mts.hamiltonian.kv,
+        params.kv_sigma,
+        params.kv_window_half_width,
+        params.kv_samples,
+    ));
+    plot.xlabel("Harmonic number");
+    plot.ylabel("|d(in-phase signal) / dΔ|");
+    plot.xlim(0.5, params.gradient_harmonics as f64 + 0.5);
+    plot.yscale(AxisScale::Log10);
+    Ok(plot)
 }
 
 fn response_controls(params: &mut Params) -> SliderGrid<'_> {
@@ -463,6 +586,7 @@ fn frequency_response_plot(params: &mut Params) -> AppResult {
 pub(crate) fn definition() -> AppDefinition<Params> {
     const VIEWS: &[ViewOption<Params>] = &[
         ViewOption::new("Probe", plot, controls),
+
         ViewOption::new("Linear response", response_plot, response_controls),
         ViewOption::new(
             "Demodulated response",
@@ -473,6 +597,11 @@ pub(crate) fn definition() -> AppDefinition<Params> {
             "Frequency response",
             frequency_response_plot,
             demodulated_response_controls,
+        ),
+        ViewOption::new(
+            "Harmonic gradients",
+            harmonic_gradient_plot,
+            harmonic_gradient_controls,
         ),
     ];
     AppDefinition::new("MTS velocity", "mts-velocity-canvas", VIEWS)
@@ -679,6 +808,55 @@ mod tests {
             assert_close(average.proj1[index], harmonic.0, 1e-12);
             assert_close(average.proj2[index], second.0, 1e-12);
             assert_close(average.proj3[index], third.0, 1e-12);
+        }
+    }
+
+    #[test]
+    fn harmonic_gradients_match_the_plotted_in_phase_signal_slopes() {
+        let epsilon = 1e-4;
+        let params = Params {
+            mts: MtsParams {
+                solver: MtsSolverParams {
+                    hz_lim: epsilon,
+                    hz_num: 2,
+                    ..small_params().mts.solver
+                },
+                ..small_params().mts
+            },
+            gradient_epsilon: epsilon,
+            gradient_harmonics: 3,
+            ..small_params()
+        };
+        let gradients = harmonic_gradients(&params).unwrap();
+        let signal = velocity_average(&params).unwrap();
+
+        for (actual, values) in
+            gradients
+                .into_iter()
+                .zip([signal.proj1, signal.proj2, signal.proj3])
+        {
+            let expected = (values[1] - values[0]) / (2.0 * epsilon);
+            assert_close(actual, expected, 1e-12);
+        }
+    }
+
+    #[test]
+    fn harmonic_gradients_validate_the_difference_and_sampling() {
+        for params in [
+            Params {
+                gradient_epsilon: 0.0,
+                ..small_params()
+            },
+            Params {
+                gradient_harmonics: 0,
+                ..small_params()
+            },
+            Params {
+                gradient_harmonics: 21,
+                ..small_params()
+            },
+        ] {
+            assert!(harmonic_gradients(&params).is_err());
         }
     }
 

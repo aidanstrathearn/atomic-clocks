@@ -102,6 +102,35 @@ pub struct DemodOutput {
     pub third_harmonic: Vec<Demodulation>,
 }
 
+/// Demodulates selected harmonics at the Hamiltonian's exact detuning.
+///
+/// Unlike [`compute_demod`], this evaluates only `hamiltonian.delta` rather than
+/// building a detuning scan. Harmonics are returned in the same order as the
+/// supplied indices. The observable and lock-in conventions match
+/// [`compute_demod`].
+pub fn compute_demod_harmonics(
+    params: &MtsParams,
+    observable: Vec3,
+    harmonics: &[usize],
+) -> Result<Vec<Demodulation>, String> {
+    params.validate()?;
+    validate_harmonics(harmonics, params.solver.steps_per_period)?;
+
+    let t_array = time_grid(
+        params.hamiltonian.modulation.period(),
+        params.solver.steps_per_period,
+        params.solver.n_periods,
+    );
+    let last_start = (params.solver.n_periods - 1) * params.solver.steps_per_period;
+    let kr_array = spatial_phases(params);
+    let projected = projected_period(params, observable, 0.0, &t_array, last_start, &kr_array);
+
+    Ok(harmonics
+        .iter()
+        .map(|&harmonic| lockin_period(&projected, harmonic))
+        .collect())
+}
+
 /// Demodulates the expectation of `observable · sigma` in the selected frame.
 /// The observable is constant in that frame and is not normalized; its magnitude
 /// scales the measured signal.
@@ -123,13 +152,7 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
         )
     };
     let last_start = (params.solver.n_periods - 1) * params.solver.steps_per_period;
-    let last_period_samples = params.solver.steps_per_period + 1;
-
-    let kr_array: Vec<_> = linspace(0.0, 2.0 * PI, params.solver.kr_n)
-        .into_iter()
-        .skip(1)
-        .map(|phase| phase + params.hamiltonian.kr)
-        .collect();
+    let kr_array = spatial_phases(params);
 
     let mut dc = Vec::with_capacity(hz_array.len());
     let mut harmonic = Vec::with_capacity(hz_array.len());
@@ -137,28 +160,9 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
     let mut third_harmonic = Vec::with_capacity(hz_array.len());
 
     for &hz_offset in &hz_array {
-        let mut projected = vec![0.0; last_period_samples];
-
-        for &kr_phase in &kr_array {
-            let atom = HamiltonianParams {
-                delta: params.hamiltonian.delta + hz_offset,
-                kr: kr_phase,
-                ..params.hamiltonian
-            };
-            accumulate_projected_trajectory(
-                &atom,
-                params.decay,
-                &t_array,
-                last_start,
-                observable,
-                &mut projected,
-            );
-        }
-
-        let kr_scale = 1.0 / kr_array.len() as f64;
-        for value in &mut projected {
-            *value *= kr_scale;
-        }
+        let projected = projected_period(
+            params, observable, hz_offset, &t_array, last_start, &kr_array,
+        );
 
         dc.push(lockin_period(&projected, 0));
         harmonic.push(lockin_period(&projected, 1));
@@ -173,6 +177,58 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
         second_harmonic,
         third_harmonic,
     })
+}
+
+fn validate_harmonics(harmonics: &[usize], steps_per_period: usize) -> Result<(), String> {
+    if let Some(&harmonic) = harmonics
+        .iter()
+        .find(|&&harmonic| harmonic > steps_per_period / 2)
+    {
+        return Err(format!(
+            "harmonic {harmonic} exceeds the Nyquist limit for {steps_per_period} steps per period"
+        ));
+    }
+    Ok(())
+}
+
+fn spatial_phases(params: &MtsParams) -> Vec<f64> {
+    linspace(0.0, 2.0 * PI, params.solver.kr_n)
+        .into_iter()
+        .skip(1)
+        .map(|phase| phase + params.hamiltonian.kr)
+        .collect()
+}
+
+fn projected_period(
+    params: &MtsParams,
+    observable: Vec3,
+    hz_offset: f64,
+    t_array: &[f64],
+    last_start: usize,
+    kr_array: &[f64],
+) -> Vec<f64> {
+    let mut projected = vec![0.0; params.solver.steps_per_period + 1];
+    for &kr_phase in kr_array {
+        let atom = HamiltonianParams {
+            delta: params.hamiltonian.delta + hz_offset,
+            kr: kr_phase,
+            ..params.hamiltonian
+        };
+        accumulate_projected_trajectory(
+            &atom,
+            params.decay,
+            t_array,
+            last_start,
+            observable,
+            &mut projected,
+        );
+    }
+
+    let kr_scale = 1.0 / kr_array.len() as f64;
+    for value in &mut projected {
+        *value *= kr_scale;
+    }
+    projected
 }
 
 fn time_grid(period: f64, steps_per_period: usize, n_periods: usize) -> Vec<f64> {
@@ -261,6 +317,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn selected_harmonics_match_the_existing_demodulation_output() {
+        let params = MtsParams {
+            solver: MtsSolverParams {
+                kr_n: 3,
+                steps_per_period: 40,
+                n_periods: 2,
+                hz_lim: 0.0,
+                hz_num: 1,
+            },
+            ..MtsParams::default()
+        };
+        let observable = Vec3::from_angles(PI / 2.0, PI / 2.0);
+        let output = compute_demod(&params, observable).unwrap();
+        let selected = compute_demod_harmonics(&params, observable, &[3, 1, 0, 2, 4]).unwrap();
+        let expected = [
+            output.third_harmonic[0],
+            output.harmonic[0],
+            output.dc[0],
+            output.second_harmonic[0],
+        ];
+
+        for (actual, expected) in selected.iter().zip(expected) {
+            assert_eq!(actual.in_phase, expected.in_phase);
+            assert_eq!(actual.quadrature, expected.quadrature);
+        }
+        assert!(selected[4].in_phase.is_finite());
+        assert!(selected[4].quadrature.is_finite());
+    }
+
+    #[test]
+    fn selected_harmonics_reject_frequencies_above_nyquist() {
+        let params = MtsParams {
+            solver: MtsSolverParams {
+                steps_per_period: 20,
+                ..MtsSolverParams::default()
+            },
+            ..MtsParams::default()
+        };
+        let error = compute_demod_harmonics(&params, Vec3::from_angles(PI / 2.0, PI / 2.0), &[11])
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "harmonic 11 exceeds the Nyquist limit for 20 steps per period"
+        );
     }
 
     #[test]
