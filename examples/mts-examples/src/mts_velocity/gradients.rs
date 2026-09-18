@@ -18,7 +18,7 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
                 1e-6..=0.1,
             )
             .logarithmic(true),
-            Slider::new("Maximum harmonic", &mut params.gradient_harmonics, 1..=50),
+            Slider::new("Maximum harmonic", &mut params.gradient_harmonics, 2..=50),
         ],
     );
     let common = common_control_groups(
@@ -103,5 +103,49 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     plot.ylabel("|d(in-phase signal) / dΔ| (per MHz)");
     plot.xlim(0.0, params.gradient_harmonics as f64 + 0.5);
     plot.yscale(AxisScale::Log10);
+    Ok(plot)
+}
+
+pub(super) fn normalised_adjacent_gradient_sums(gradients: &[f64]) -> Result<Vec<f64>, String> {
+    if gradients.len() < 3 {
+        return Err("at least two harmonics are required".to_string());
+    }
+    let normalisation = gradients[1];
+    if !normalisation.is_finite() || normalisation == 0.0 {
+        return Err("first-harmonic gradient must be finite and nonzero".to_string());
+    }
+
+    (1..gradients.len() - 1)
+        .map(|harmonic| {
+            let lower = if harmonic == 1 {
+                2.0 * gradients[0]
+            } else {
+                gradients[harmonic - 1]
+            };
+            let ratio = (lower + gradients[harmonic + 1]) / normalisation;
+            let squared = ratio.abs().powi(2);
+            if squared.is_finite() {
+                Ok(squared)
+            } else {
+                Err(format!(
+                    "normalised adjacent-gradient sum is non-finite at harmonic {harmonic}"
+                ))
+            }
+        })
+        .collect()
+}
+
+pub(super) fn adjacent_plot(params: &mut Params) -> AppResult {
+    let values = normalised_adjacent_gradient_sums(&harmonic_gradients(params)?)?;
+    let harmonics: Vec<_> = (1..params.gradient_harmonics)
+        .map(|harmonic| harmonic as f64)
+        .collect();
+
+    let mut plot = Plotter::new();
+    plot.plot(&harmonics, &values);
+    plot.ylabel("Weight");
+    plot.xlabel("Harmonic number k");
+    plot.yscale(AxisScale::Log10);
+    //plot.ylim(0.5, params.gradient_harmonics as f64 - 0.5);
     Ok(plot)
 }

@@ -6,7 +6,7 @@ use atomic_clocks::vapourcell::{
 };
 
 use super::Params;
-use super::gradients::harmonic_gradients;
+use super::gradients::{harmonic_gradients, normalised_adjacent_gradient_sums};
 use super::probe::velocity_average;
 use super::response::{response_at_velocity, response_output};
 use super::velocity::velocity_samples;
@@ -252,6 +252,22 @@ fn harmonic_gradients_validate_the_difference_and_sampling() {
     ] {
         assert!(harmonic_gradients(&params).is_err());
     }
+}
+
+#[test]
+fn adjacent_gradient_sums_use_signed_neighbours_and_double_dc() {
+    let values = normalised_adjacent_gradient_sums(&[2.0, 4.0, -3.0, 5.0, -7.0]).unwrap();
+    assert_eq!(values.len(), 3);
+    assert_close(values[0], 1.0 / 16.0, 1e-15);
+    assert_close(values[1], 81.0 / 16.0, 1e-15);
+    assert_close(values[2], 25.0 / 4.0, 1e-15);
+}
+
+#[test]
+fn adjacent_gradient_sums_require_two_harmonics_and_nonzero_normalisation() {
+    assert!(normalised_adjacent_gradient_sums(&[1.0, 2.0]).is_err());
+    assert!(normalised_adjacent_gradient_sums(&[1.0, 0.0, 2.0]).is_err());
+    assert!(normalised_adjacent_gradient_sums(&[1.0, f64::NAN, 2.0]).is_err());
 }
 
 #[test]

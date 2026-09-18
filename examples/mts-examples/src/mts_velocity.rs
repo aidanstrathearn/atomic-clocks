@@ -105,7 +105,12 @@ pub(crate) fn definition() -> AppDefinition<Params> {
             response::frequency_plot,
             response::demodulated_controls,
         ),
-        ViewOption::new("Harmonic gradients", gradients::plot, gradients::controls),
+        //ViewOption::new("Harmonic gradients", gradients::plot, gradients::controls),
+        ViewOption::new(
+            "Intermod. noise",
+            gradients::adjacent_plot,
+            gradients::controls,
+        ),
     ];
     AppDefinition::new("MTS velocity", "mts-velocity-canvas", VIEWS)
 }
