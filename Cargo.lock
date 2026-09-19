@@ -1395,12 +1395,11 @@ dependencies = [
 [[package]]
 name = "myplotlib"
 version = "0.1.0"
-source = "git+https://github.com/aidanstrathearn/myplotlib.git#ab0d217a6bb84fa84e25ec48ff7ea8aceaf26248"
+source = "git+https://github.com/aidanstrathearn/myplotlib.git#84b91ebe879a7908c44e3525b2838502c5c46282"
 dependencies = [
  "eframe",
  "egui_plot",
  "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
  "web-time",
 ]

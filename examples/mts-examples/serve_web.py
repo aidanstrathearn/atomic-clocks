@@ -25,14 +25,14 @@ def main():
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
 
-    dist = Path(__file__).resolve().parent / "dist"
-    if not dist.is_dir():
-        raise SystemExit("dist/ is missing; run `trunk build --release` first")
+    root = Path(__file__).resolve().parent
+    if not (root / "dist").is_dir():
+        raise SystemExit("dist/ is missing; run `cargo myplotlib build-web` first")
 
-    handler = partial(CrossOriginIsolatedHandler, directory=dist)
+    handler = partial(CrossOriginIsolatedHandler, directory=root)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
 
-    print(f"Serving {dist} at http://127.0.0.1:{args.port}")
+    print(f"Serving {root} at http://127.0.0.1:{args.port}")
     print("Press Ctrl+C to stop")
 
     try:
