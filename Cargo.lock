@@ -1387,7 +1387,9 @@ dependencies = [
  "myplotlib",
  "rayon",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-rayon",
+ "web-sys",
 ]
 
 [[package]]

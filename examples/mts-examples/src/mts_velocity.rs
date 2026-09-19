@@ -112,7 +112,7 @@ pub(crate) fn definition() -> AppDefinition<Params> {
             gradients::controls,
         ),
     ];
-    AppDefinition::new("MTS velocity", "mts-velocity-canvas", VIEWS)
+    AppDefinition::new("MTS velocity", VIEWS)
 }
 
 #[cfg(test)]
