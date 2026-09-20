@@ -18,15 +18,6 @@ const RAMSEY_VIEWS: &[ViewOption<RamseyParameters>] = &[
     ViewOption::new("Allan deviation", adev_plot::plot, controls::feedback),
 ];
 
-const RAMSEY_APP: AppDefinition<RamseyParameters> =
-    AppDefinition::new("Ramsey", "ramsey-canvas", RAMSEY_VIEWS);
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn run_native() -> myplotlib::NativeResult {
-    myplotlib::run_native(RAMSEY_APP)
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn run_web() -> myplotlib::WebResult {
-    myplotlib::run_web(RAMSEY_APP)
+pub(crate) fn definition() -> AppDefinition<RamseyParameters> {
+    AppDefinition::new("Ramsey", RAMSEY_VIEWS)
 }

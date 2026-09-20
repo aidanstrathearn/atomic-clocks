@@ -4,7 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ramsey</title>
-    <link data-trunk rel="rust" />
     <style>
       html,
       body {
@@ -19,9 +18,28 @@
         height: 100%;
         display: block;
       }
+
+      #error {
+        position: fixed;
+        inset: 1rem auto auto 1rem;
+        color: #a40000;
+        background: white;
+      }
     </style>
   </head>
   <body>
     <canvas id="ramsey-canvas"></canvas>
+    <p id="error" role="alert"></p>
+
+    <script type="module">
+      import { mount } from "./dist/app.js";
+
+      try {
+        await mount(document.querySelector("#ramsey-canvas"));
+      } catch (error) {
+        document.querySelector("#error").textContent = String(error);
+        console.error(error);
+      }
+    </script>
   </body>
 </html>
