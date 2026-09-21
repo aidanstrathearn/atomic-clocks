@@ -4,7 +4,9 @@ use atomic_clocks::twolevel::Vec3;
 mod support;
 
 use atomic_clocks::vapourcell as current;
-use support::{assert_outputs_close, current_params, mts_reference as reference, scan_cases};
+use support::{
+    SIGNAL_HARMONICS, assert_outputs_close, current_params, mts_reference as reference, scan_cases,
+};
 
 #[test]
 fn scans_match_reference_across_frames_and_parameters() {
@@ -13,6 +15,7 @@ fn scans_match_reference_across_frames_and_parameters() {
         let actual = current::compute_demod(
             &current_params(&case.params),
             Vec3::from_angles(FRAC_PI_2, FRAC_PI_2),
+            SIGNAL_HARMONICS,
         )
         .expect("current scan succeeds");
         let error = assert_outputs_close(&case.name, &actual, &expected);
@@ -26,6 +29,7 @@ fn default_scan_matches_frozen_defaults() {
     let actual = current::compute_demod(
         &current::MtsParams::default(),
         Vec3::from_angles(FRAC_PI_2, FRAC_PI_2),
+        SIGNAL_HARMONICS,
     )
     .unwrap();
     assert_outputs_close("default configuration", &actual, &expected);
@@ -46,9 +50,16 @@ fn one_interval_is_a_valid_aligned_period() {
     let actual = current::compute_demod(
         &current_params(&params),
         Vec3::from_angles(FRAC_PI_2, FRAC_PI_2),
+        [0],
     )
     .unwrap();
-    assert_outputs_close("one interval", &actual, &expected);
+    assert_eq!(actual.hz, expected.hz);
+    assert_eq!(actual.harmonics, [0]);
+    assert_eq!(actual.values.len(), expected.amp0.len());
+    for (actual, expected) in actual.values.iter().zip(expected.amp0) {
+        let actual = actual[0].amplitude() / 2.0;
+        assert!((actual - expected).abs() <= support::ABS_TOL + support::REL_TOL * expected.abs());
+    }
 }
 
 #[test]
@@ -84,6 +95,7 @@ fn invalid_parameters_match_reference_errors() {
         let actual = current::compute_demod(
             &current_params(&params),
             Vec3::from_angles(FRAC_PI_2, FRAC_PI_2),
+            SIGNAL_HARMONICS,
         )
         .unwrap_err();
         assert_eq!(actual, expected, "{params:?}");

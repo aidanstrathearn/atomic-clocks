@@ -8,7 +8,9 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 #[path = "../tests/support/mod.rs"]
 mod support;
 
-use support::{assert_outputs_close, current_params, mts_reference as reference, scan_cases};
+use support::{
+    SIGNAL_HARMONICS, assert_outputs_close, current_params, mts_reference as reference, scan_cases,
+};
 
 fn mts_ab(c: &mut Criterion) {
     let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
@@ -25,8 +27,8 @@ fn mts_ab(c: &mut Criterion) {
         // timed calls include the complete scan's grid construction/allocations.
         let expected =
             reference::compute_demod(&reference_params).expect("reference scan succeeds");
-        let actual =
-            current::compute_demod(&current_params, observable).expect("current scan succeeds");
+        let actual = current::compute_demod(&current_params, observable, SIGNAL_HARMONICS)
+            .expect("current scan succeeds");
         let error = assert_outputs_close(&case.name, &actual, &expected);
         eprintln!(
             "{}: A/B parity OK, max absolute error {error:.3e}",
@@ -49,8 +51,12 @@ fn mts_ab(c: &mut Criterion) {
         group.bench_function("current", |b| {
             b.iter(|| {
                 black_box(
-                    current::compute_demod(black_box(&current_params), observable)
-                        .expect("current scan succeeds"),
+                    current::compute_demod(
+                        black_box(&current_params),
+                        observable,
+                        SIGNAL_HARMONICS,
+                    )
+                    .expect("current scan succeeds"),
                 )
             });
         });

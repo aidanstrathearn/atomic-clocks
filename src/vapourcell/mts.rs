@@ -101,19 +101,15 @@ impl MtsParams {
     }
 }
 
+/// Demodulated values for a detuning scan.
 #[derive(Clone, Debug)]
-pub struct DemodOutput {
+pub struct DemodOutput<const N: usize> {
     /// Detuning offsets relative to the Hamiltonian's `delta`.
     pub hz: Vec<f64>,
-    /// Zero-frequency lock-in results: twice the signed mean in `in_phase`,
-    /// with zero `quadrature`.
-    pub dc: Vec<Demodulation>,
-    /// Signed cosine and sine coefficients at the modulation frequency.
-    pub harmonic: Vec<Demodulation>,
-    /// Signed cosine and sine coefficients at twice the modulation frequency.
-    pub second_harmonic: Vec<Demodulation>,
-    /// Signed cosine and sine coefficients at three times the modulation frequency.
-    pub third_harmonic: Vec<Demodulation>,
+    /// Harmonic indices corresponding to each position in `values`.
+    pub harmonics: [usize; N],
+    /// One array of lock-in results per detuning offset, indexed like `harmonics`.
+    pub values: Vec<[Demodulation; N]>,
 }
 
 struct Demodulator {
@@ -209,11 +205,15 @@ pub fn compute_demod_harmonics(
 
 /// Demodulates the expectation of `observable · sigma` in the selected frame.
 /// The observable is constant in that frame and is not normalized; its magnitude
-/// scales the measured signal.
-pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput, String> {
+/// scales the measured signal. Harmonics are returned in the same order as the
+/// supplied indices.
+pub fn compute_demod<const N: usize>(
+    params: &MtsParams,
+    observable: Vec3,
+    harmonics: [usize; N],
+) -> Result<DemodOutput<N>, String> {
     params.validate()?;
     let demodulator = Demodulator::from_validated(params, observable);
-    const HARMONICS: [usize; 4] = [0, 1, 2, 3];
     let hz_array = if params.solver.hz_num == 1 {
         vec![-params.solver.hz_lim]
     } else {
@@ -223,30 +223,15 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
             params.solver.hz_num - 1,
         )
     };
-    let mut dc = Vec::with_capacity(hz_array.len());
-    let mut harmonic = Vec::with_capacity(hz_array.len());
-    let mut second_harmonic = Vec::with_capacity(hz_array.len());
-    let mut third_harmonic = Vec::with_capacity(hz_array.len());
-
+    let mut values = Vec::with_capacity(hz_array.len());
     for &hz_offset in &hz_array {
-        let [
-            dc_value,
-            harmonic_value,
-            second_harmonic_value,
-            third_harmonic_value,
-        ] = demodulator.demodulate(hz_offset, HARMONICS)?;
-        dc.push(dc_value);
-        harmonic.push(harmonic_value);
-        second_harmonic.push(second_harmonic_value);
-        third_harmonic.push(third_harmonic_value);
+        values.push(demodulator.demodulate(hz_offset, harmonics)?);
     }
 
     Ok(DemodOutput {
         hz: hz_array,
-        dc,
-        harmonic,
-        second_harmonic,
-        third_harmonic,
+        harmonics,
+        values,
     })
 }
 
@@ -307,6 +292,8 @@ mod tests {
     use super::*;
     use crate::maths::demodulation::ModulationParams;
 
+    const SIGNAL_HARMONICS: [usize; 4] = [0, 1, 2, 3];
+
     #[test]
     fn rejects_invalid_modulation_frequency() {
         for mod_freq in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
@@ -321,7 +308,12 @@ mod tests {
                 ..MtsParams::default()
             };
             assert_eq!(
-                compute_demod(&params, Vec3::from_angles(PI / 2.0, PI / 2.0)).unwrap_err(),
+                compute_demod(
+                    &params,
+                    Vec3::from_angles(PI / 2.0, PI / 2.0),
+                    SIGNAL_HARMONICS,
+                )
+                .unwrap_err(),
                 "mod_freq must be positive and finite"
             );
         }
@@ -337,24 +329,24 @@ mod tests {
                 },
                 ..MtsParams::default()
             };
-            let output = compute_demod(&params, Vec3::from_angles(PI / 2.0, PI / 2.0))
-                .expect("default scan succeeds");
+            let output = compute_demod(
+                &params,
+                Vec3::from_angles(PI / 2.0, PI / 2.0),
+                SIGNAL_HARMONICS,
+            )
+            .expect("default scan succeeds");
             assert_eq!(output.hz.len(), params.solver.hz_num);
+            assert_eq!(output.harmonics, SIGNAL_HARMONICS);
             assert!(output.hz.iter().all(|value| value.is_finite()));
-            for values in [
-                &output.dc,
-                &output.harmonic,
-                &output.second_harmonic,
-                &output.third_harmonic,
-            ] {
-                assert_eq!(values.len(), params.solver.hz_num);
-                assert!(
-                    values
-                        .iter()
-                        .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite()),
-                    "{frame:?}"
-                );
-            }
+            assert_eq!(output.values.len(), params.solver.hz_num);
+            assert!(
+                output
+                    .values
+                    .iter()
+                    .flatten()
+                    .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite()),
+                "{frame:?}"
+            );
         }
     }
 
@@ -371,25 +363,19 @@ mod tests {
             ..MtsParams::default()
         };
         let observable = Vec3::from_angles(PI / 2.0, PI / 2.0);
-        let output = compute_demod(&params, observable).unwrap();
+        let output = compute_demod(&params, observable, SIGNAL_HARMONICS).unwrap();
         let harmonics = [3, 1, 0, 2, 4];
         let selected = compute_demod_harmonics(&params, observable, &harmonics).unwrap();
-        let fixed = Demodulator::new(&params, observable)
-            .unwrap()
-            .demodulate(0.0, harmonics)
-            .unwrap();
-        let expected = [
-            output.third_harmonic[0],
-            output.harmonic[0],
-            output.dc[0],
-            output.second_harmonic[0],
-        ];
+        let fixed = compute_demod(&params, observable, harmonics).unwrap();
+        let [dc, first, second, third] = output.values[0];
+        let expected = [third, first, dc, second];
 
         for (actual, expected) in selected.iter().zip(expected) {
             assert_eq!(actual.in_phase, expected.in_phase);
             assert_eq!(actual.quadrature, expected.quadrature);
         }
-        for (actual, expected) in fixed.iter().zip(&selected) {
+        assert_eq!(fixed.harmonics, harmonics);
+        for (actual, expected) in fixed.values[0].iter().zip(&selected) {
             assert_eq!(actual.in_phase, expected.in_phase);
             assert_eq!(actual.quadrature, expected.quadrature);
         }
@@ -416,7 +402,7 @@ mod tests {
                 .iter()
                 .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite())
         );
-        assert!(compute_demod(&params, observable).is_err());
+        assert!(compute_demod(&params, observable, SIGNAL_HARMONICS).is_err());
     }
 
     #[test]
@@ -477,7 +463,7 @@ mod tests {
                         ..MtsSolverParams::default()
                     },
                 };
-                let output = compute_demod(&params, observable).unwrap();
+                let output = compute_demod(&params, observable, SIGNAL_HARMONICS).unwrap();
                 assert_eq!(output.hz[1], 0.0);
                 let mut expected = [0.0; 5];
                 for i in 0..=8 {
@@ -492,16 +478,17 @@ mod tests {
                     expected[3] += weight * signal * (2.0 * t).cos();
                     expected[4] += weight * signal * (2.0 * t).sin();
                 }
+                let [dc, first, second, _third] = output.values[1];
                 for (actual, expected) in [
-                    (output.dc[1].in_phase, expected[0]),
-                    (output.harmonic[1].in_phase, expected[1]),
-                    (output.harmonic[1].quadrature, expected[2]),
-                    (output.second_harmonic[1].in_phase, expected[3]),
-                    (output.second_harmonic[1].quadrature, expected[4]),
+                    (dc.in_phase, expected[0]),
+                    (first.in_phase, expected[1]),
+                    (first.quadrature, expected[2]),
+                    (second.in_phase, expected[3]),
+                    (second.quadrature, expected[4]),
                 ] {
                     assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
                 }
-                assert_eq!(output.dc[1].quadrature, 0.0);
+                assert_eq!(dc.quadrature, 0.0);
             }
         }
     }
@@ -540,13 +527,11 @@ mod tests {
                     },
                 },
                 Vec3::from_angles(PI / 2.0, PI / 2.0),
+                SIGNAL_HARMONICS,
             )
             .unwrap();
-            let actual = [
-                output.dc[0].in_phase,
-                output.harmonic[0].in_phase,
-                output.harmonic[0].quadrature,
-            ];
+            let [dc, first, _second, _third] = output.values[0];
+            let actual = [dc.in_phase, first.in_phase, first.quadrature];
             for i in 0..3 {
                 let error = (actual[i] - expected[i]).abs();
                 assert!(

@@ -1,14 +1,13 @@
-use atomic_clocks::maths::demodulation::{Demodulation, ModulationParams};
+use atomic_clocks::maths::demodulation::ModulationParams;
 use atomic_clocks::maths::normalised_gaussian;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    DemodOutput, Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams,
-    compute_demod,
+    Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams, compute_demod,
 };
 
 use crate::app::Params;
 use crate::gradients::{harmonic_gradients, normalised_adjacent_gradient_sums};
-use crate::probe::{MtsCurves, velocity_average};
+use crate::probe::{MtsCurves, SIGNAL_HARMONICS, SignalOutput, velocity_average};
 use crate::response::{response_at_velocity, response_output};
 
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
@@ -18,7 +17,7 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     );
 }
 
-fn demod_at_velocity(params: &Params, kv: f64) -> DemodOutput {
+fn demod_at_velocity(params: &Params, kv: f64) -> SignalOutput {
     compute_demod(
         &MtsParams {
             hamiltonian: params.probe_hamiltonian(kv),
@@ -29,6 +28,7 @@ fn demod_at_velocity(params: &Params, kv: f64) -> DemodOutput {
             y: 1.0,
             z: 0.0,
         },
+        SIGNAL_HARMONICS,
     )
     .unwrap()
 }
@@ -73,7 +73,7 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
                     .sum::<f64>()
             };
             let raw = demod_at_velocity(&params, kv);
-            let dc_sign = raw.dc[1].in_phase.signum();
+            let dc_sign = raw.values[1][0].in_phase.signum();
             let curves = MtsCurves::from(raw);
             // Probe plots -abs(mean) for DC; harmonic zero returns 2*mean.
             let integrated = [
@@ -148,28 +148,17 @@ fn weighted_signal_matches_serial_signed_coefficients() {
         .collect();
 
     assert_eq!(average.hz, reference[0].1.hz);
+    assert_eq!(average.harmonics, SIGNAL_HARMONICS);
     for index in 0..average.hz.len() {
-        let sum = |select: fn(&DemodOutput) -> &[Demodulation]| {
-            reference
+        for harmonic_index in 0..SIGNAL_HARMONICS.len() {
+            let expected = reference
                 .iter()
                 .map(|(weight, output)| {
-                    let value = &select(output)[index];
+                    let value = output.values[index][harmonic_index];
                     (weight * value.in_phase, weight * value.quadrature)
                 })
-                .fold((0.0, 0.0), |sum, value| (sum.0 + value.0, sum.1 + value.1))
-        };
-        for (actual, expected) in [
-            (&average.dc[index], sum(|output| &output.dc)),
-            (&average.harmonic[index], sum(|output| &output.harmonic)),
-            (
-                &average.second_harmonic[index],
-                sum(|output| &output.second_harmonic),
-            ),
-            (
-                &average.third_harmonic[index],
-                sum(|output| &output.third_harmonic),
-            ),
-        ] {
+                .fold((0.0, 0.0), |sum, value| (sum.0 + value.0, sum.1 + value.1));
+            let actual = average.values[index][harmonic_index];
             assert_close(actual.in_phase, expected.0, 1e-12);
             assert_close(actual.quadrature, expected.1, 1e-12);
         }
@@ -195,12 +184,10 @@ fn harmonic_gradients_match_the_plotted_in_phase_signal_slopes() {
     let gradients = harmonic_gradients(&params).unwrap();
     let signal = velocity_average(&params).unwrap();
 
-    for (actual, values) in gradients.into_iter().skip(1).zip([
-        signal.harmonic,
-        signal.second_harmonic,
-        signal.third_harmonic,
-    ]) {
-        let expected = (values[1].in_phase - values[0].in_phase) / (2.0 * epsilon);
+    for (actual, harmonic_index) in gradients.into_iter().skip(1).zip(1..=3) {
+        let expected = (signal.values[1][harmonic_index].in_phase
+            - signal.values[0][harmonic_index].in_phase)
+            / (2.0 * epsilon);
         assert_close(actual, expected, 1e-12);
     }
 }
@@ -356,6 +343,7 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
                 y: 1.0,
                 z: 0.0,
             },
+            SIGNAL_HARMONICS,
         )
         .unwrap();
         let zero_shift = compute_demod(
@@ -365,9 +353,12 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
                 y: 1.0,
                 z: 0.0,
             },
+            SIGNAL_HARMONICS,
         )
         .unwrap();
-        for (actual, expected) in finite_shift.harmonic.iter().zip(zero_shift.harmonic) {
+        for (actual, expected) in finite_shift.values.iter().zip(zero_shift.values) {
+            let actual = actual[1];
+            let expected = expected[1];
             assert_close(actual.in_phase, expected.in_phase, 1e-12);
             assert_close(actual.quadrature, expected.quadrature, 1e-12);
         }
@@ -412,7 +403,7 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
         })
         .sum::<f64>();
     let signal = velocity_average(&params).unwrap();
-    let slope = (signal.harmonic[2].in_phase - signal.harmonic[0].in_phase) / (2.0 * epsilon);
+    let slope = (signal.values[2][1].in_phase - signal.values[0][1].in_phase) / (2.0 * epsilon);
     assert_close(integral, slope, 2e-5);
 }
 
@@ -420,17 +411,13 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
 fn default_velocity_scan_is_finite() {
     let params = Params::default();
     let average = velocity_average(&params).unwrap();
-    for values in [
-        &average.dc,
-        &average.harmonic,
-        &average.second_harmonic,
-        &average.third_harmonic,
-    ] {
-        assert_eq!(values.len(), params.mts.solver.hz_num);
-        assert!(
-            values
-                .iter()
-                .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite())
-        );
-    }
+    assert_eq!(average.harmonics, SIGNAL_HARMONICS);
+    assert_eq!(average.values.len(), params.mts.solver.hz_num);
+    assert!(
+        average
+            .values
+            .iter()
+            .flatten()
+            .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite())
+    );
 }

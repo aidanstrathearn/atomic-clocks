@@ -9,6 +9,7 @@ pub mod mts_reference;
 
 pub const ABS_TOL: f64 = 1e-12;
 pub const REL_TOL: f64 = 1e-10;
+pub const SIGNAL_HARMONICS: [usize; 4] = [0, 1, 2, 3];
 
 pub struct Case {
     pub name: String,
@@ -142,7 +143,7 @@ pub fn scan_cases() -> Vec<Case> {
 /// tolerance. Return the maximum absolute signal error for test/benchmark logs.
 pub fn assert_outputs_close(
     case: &str,
-    actual: &current::DemodOutput,
+    actual: &current::DemodOutput<{ SIGNAL_HARMONICS.len() }>,
     expected: &mts_reference::DemodOutput,
 ) -> f64 {
     assert!(
@@ -150,28 +151,33 @@ pub fn assert_outputs_close(
         "{case}: non-finite grid"
     );
     assert_eq!(actual.hz, expected.hz, "{case}: detuning grid changed");
-    for values in [&actual.dc, &actual.harmonic] {
-        assert_eq!(
-            values.len(),
-            actual.hz.len(),
-            "{case}: coefficient count changed"
-        );
-        assert!(
-            values
-                .iter()
-                .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite()),
-            "{case}: non-finite coefficient"
-        );
-    }
+    assert_eq!(
+        actual.harmonics, SIGNAL_HARMONICS,
+        "{case}: harmonics changed"
+    );
+    assert_eq!(
+        actual.values.len(),
+        actual.hz.len(),
+        "{case}: coefficient count changed"
+    );
+    assert!(
+        actual
+            .values
+            .iter()
+            .flatten()
+            .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite()),
+        "{case}: non-finite coefficient"
+    );
     // The reference stores magnitudes and signed display projections, not raw I/Q.
     let amp0: Vec<_> = actual
-        .dc
+        .values
         .iter()
-        .map(|value| value.amplitude() / 2.0)
+        .map(|values| values[0].amplitude() / 2.0)
         .collect();
     let mut amp1 = Vec::new();
     let mut proj1 = Vec::new();
-    for (&hz, value) in actual.hz.iter().zip(&actual.harmonic) {
+    for (&hz, values) in actual.hz.iter().zip(&actual.values) {
+        let value = values[1];
         let sign = if hz == 0.0 { 0.0 } else { -hz.signum() };
         let amplitude = value.amplitude() * sign;
         amp1.push(amplitude);

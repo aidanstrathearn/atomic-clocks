@@ -8,6 +8,9 @@ use rayon::prelude::*;
 use crate::app::{Params, common_control_groups};
 use crate::units::{frequency_slider, to_mhz};
 
+pub(super) const SIGNAL_HARMONICS: [usize; 4] = [0, 1, 2, 3];
+pub(super) type SignalOutput = DemodOutput<{ SIGNAL_HARMONICS.len() }>;
+
 /// Scalar curves derived from one combined demodulation output for plotting.
 pub(super) struct MtsCurves {
     pub hz: Vec<f64>,
@@ -17,27 +20,30 @@ pub(super) struct MtsCurves {
     pub proj3: Vec<f64>,
 }
 
-impl From<DemodOutput> for MtsCurves {
-    fn from(output: DemodOutput) -> Self {
-        let amp0: Vec<_> = output
-            .dc
-            .iter()
-            .map(|value| value.amplitude() / 2.0)
-            .collect();
+impl From<SignalOutput> for MtsCurves {
+    fn from(output: SignalOutput) -> Self {
+        let DemodOutput {
+            hz,
+            harmonics,
+            values,
+        } = output;
+        assert_eq!(harmonics, SIGNAL_HARMONICS);
+        let mut amp0 = Vec::with_capacity(values.len());
+        let mut proj1 = Vec::with_capacity(values.len());
+        let mut proj2 = Vec::with_capacity(values.len());
+        let mut proj3 = Vec::with_capacity(values.len());
+        for [dc, first, second, third] in values {
+            amp0.push(dc.amplitude() / 2.0);
+            proj1.push(first.in_phase);
+            proj2.push(second.in_phase);
+            proj3.push(third.in_phase);
+        }
         Self {
-            hz: output.hz,
+            hz,
             amp0,
-            proj1: output.harmonic.iter().map(|value| value.in_phase).collect(),
-            proj2: output
-                .second_harmonic
-                .iter()
-                .map(|value| value.in_phase)
-                .collect(),
-            proj3: output
-                .third_harmonic
-                .iter()
-                .map(|value| value.in_phase)
-                .collect(),
+            proj1,
+            proj2,
+            proj3,
         }
     }
 }
@@ -93,13 +99,8 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     SliderGrid::new(5, common.into_iter().chain([scan]))
 }
 
-fn scale_demod_output(output: &mut DemodOutput, weight: f64) {
-    for values in [
-        &mut output.dc,
-        &mut output.harmonic,
-        &mut output.second_harmonic,
-        &mut output.third_harmonic,
-    ] {
+fn scale_demod_output<const N: usize>(output: &mut DemodOutput<N>, weight: f64) {
+    for values in &mut output.values {
         for value in values {
             value.in_phase *= weight;
             value.quadrature *= weight;
@@ -107,19 +108,18 @@ fn scale_demod_output(output: &mut DemodOutput, weight: f64) {
     }
 }
 
-fn add_demod_output(sum: &mut DemodOutput, output: DemodOutput, weight: f64) -> Result<(), String> {
+fn add_demod_output<const N: usize>(
+    sum: &mut DemodOutput<N>,
+    output: DemodOutput<N>,
+    weight: f64,
+) -> Result<(), String> {
     if sum.hz != output.hz {
         return Err("velocity signal grids do not match".to_string());
     }
-    for (sums, values) in [
-        (&mut sum.dc, output.dc),
-        (&mut sum.harmonic, output.harmonic),
-        (&mut sum.second_harmonic, output.second_harmonic),
-        (&mut sum.third_harmonic, output.third_harmonic),
-    ] {
-        if sums.len() != values.len() {
-            return Err("velocity signal dimensions do not match".to_string());
-        }
+    if sum.harmonics != output.harmonics || sum.values.len() != output.values.len() {
+        return Err("velocity signal dimensions do not match".to_string());
+    }
+    for (sums, values) in sum.values.iter_mut().zip(output.values) {
         for (sum, value) in sums.iter_mut().zip(values) {
             sum.in_phase += weight * value.in_phase;
             sum.quadrature += weight * value.quadrature;
@@ -128,7 +128,7 @@ fn add_demod_output(sum: &mut DemodOutput, output: DemodOutput, weight: f64) -> 
     Ok(())
 }
 
-pub(super) fn velocity_average(params: &Params) -> Result<DemodOutput, String> {
+pub(super) fn velocity_average(params: &Params) -> Result<SignalOutput, String> {
     let samples = params.velocity_params().samples()?;
     let probe = MtsParams {
         hamiltonian: params.probe_hamiltonian(0.0),
@@ -148,6 +148,7 @@ pub(super) fn velocity_average(params: &Params) -> Result<DemodOutput, String> {
                     ..probe
                 },
                 Vec3::from_angles(FRAC_PI_2, FRAC_PI_2),
+                SIGNAL_HARMONICS,
             )
             .map(|output| (sample.weight, output))
         })
