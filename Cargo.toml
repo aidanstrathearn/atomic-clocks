@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [workspace]
-members = ["examples/mts-examples", "examples/ramsey-example"]
-default-members = [".", "examples/mts-examples", "examples/ramsey-example"]
+members = ["examples/mts-example", "examples/ramsey-example"]
+default-members = [".", "examples/mts-example", "examples/ramsey-example"]
 exclude = ["local-examples"]
 resolver = "3"
 

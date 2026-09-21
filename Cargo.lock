@@ -1380,7 +1380,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mts-examples"
+name = "mts-example"
 version = "0.1.0"
 dependencies = [
  "atomic-clocks",

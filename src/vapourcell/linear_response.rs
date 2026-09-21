@@ -122,7 +122,7 @@ impl LinearResponseOutput {
 /// Spatially averages the response of `observable · sigma` to a change in `delta`.
 /// Uses exactly `hamiltonian.kv` and `hamiltonian.delta`, with no detuning scan or
 /// velocity averaging. The observable is constant in `hamiltonian.frame` and its
-/// magnitude scales the result. Use `(0, 1, 0)` to match the MTS examples.
+/// magnitude scales the result. Use `(0, 1, 0)` to match the MTS example.
 ///
 /// The perturbation is `H = H0 + f(t) sigma_z / 2`, with decay held fixed:
 /// `delta<O(t)> = integral chi(t, s) f(s) ds` over `s <= t`. Thus each entry is
