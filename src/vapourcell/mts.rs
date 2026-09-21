@@ -236,10 +236,10 @@ pub fn compute_demod<const N: usize>(
     params.validate_propagation()?;
     let hz_array = params.scan.offsets()?;
     let demodulator = Demodulator::from_validated(params, observable);
-    let mut values = Vec::with_capacity(hz_array.len());
-    for &hz_offset in &hz_array {
-        values.push(demodulator.demodulate(hz_offset, harmonics)?);
-    }
+    let values = hz_array
+        .iter()
+        .map(|&hz_offset| demodulator.demodulate(hz_offset, harmonics))
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(DemodOutput {
         hz: hz_array,
