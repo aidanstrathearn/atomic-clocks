@@ -76,6 +76,19 @@ pub struct RamseyResponse {
     pub time_step: f64,
 }
 
+impl RamseyResponse {
+    pub fn transfer_function(
+        &self,
+        max_angular_frequency_step: f64,
+    ) -> Result<TransferFunctionSamples, SpectrumError> {
+        TransferFunctionSamples::try_from(past_response_transform(
+            &self.values,
+            self.time_step,
+            max_angular_frequency_step,
+        ))
+    }
+}
+
 impl Ramsey {
     pub fn solver(self, config: TrotterConfig) -> Result<RamseySolver, RamseySolverError> {
         for (name, value) in [
@@ -157,18 +170,7 @@ impl RamseySolver {
     }
 }
 
-impl RamseyResponse {
-    pub fn transfer_function(
-        &self,
-        max_angular_frequency_step: f64,
-    ) -> Result<TransferFunctionSamples, SpectrumError> {
-        TransferFunctionSamples::try_from(past_response_transform(
-            &self.values,
-            self.time_step,
-            max_angular_frequency_step,
-        ))
-    }
-}
+
 
 pub struct ModulatedRamsey {
     pub pulse_area: f64,
