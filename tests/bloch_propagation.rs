@@ -228,20 +228,26 @@ fn composed_propagation_matches_sequential_for_full_and_reduced_grids() {
             }
         }
     }
+}
 
-    let actual = Unitary::from_system(
-        &ramsey,
+#[test]
+#[should_panic(expected = "time boundaries must be finite with stop > start")]
+fn trotter_config_rejects_an_empty_time_window() {
+    Unitary::from_system(
+        &Ramsey {
+            pulse_area: 1.2,
+            detuning: 0.7,
+            pulse_width: 0.2,
+            pulse_separation: 2.0,
+            phase_diff: 0.8,
+        },
         TrotterConfig {
             start: -1.0,
             stop: -1.0,
             nsteps: 1,
             tolerance: 0.0,
         },
-    )
-    .apply_to(BlochVec::ground());
-    assert_close(actual.r.x, 0.0);
-    assert_close(actual.r.y, 0.0);
-    assert_close(actual.r.z, -1.0);
+    );
 }
 
 fn response_channels() -> Vec<Unitary> {

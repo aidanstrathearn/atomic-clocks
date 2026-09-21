@@ -5,7 +5,7 @@ use crate::maths::vec3::Vec3;
 
 use crate::twolevel::{AffineChannel, BlochVec, Channel, ComposableChannel, Observable, Process};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct TrotterConfig {
     pub start: f64,
     pub stop: f64,
@@ -14,11 +14,11 @@ pub struct TrotterConfig {
 }
 
 impl TrotterConfig {
-    fn validate(self) {
+    pub(crate) fn validate(self) {
         assert!(self.nsteps > 0, "at least one integration step is required");
         assert!(
-            self.start.is_finite() && self.stop.is_finite() && self.stop >= self.start,
-            "time boundaries must be finite with stop >= start"
+            self.start.is_finite() && self.stop.is_finite() && self.stop > self.start,
+            "time boundaries must be finite with stop > start"
         );
         assert!(
             (self.stop - self.start).is_finite(),
@@ -50,9 +50,6 @@ impl Unitary {
 
     pub fn from_system(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
         config.validate();
-        if config.start == config.stop {
-            return Self::identity();
-        }
         let total = if config.tolerance > 0.0 {
             Self::reduced_compose(system, config)
         } else {

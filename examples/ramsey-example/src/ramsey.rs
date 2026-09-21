@@ -5,27 +5,32 @@ use std::{
 
 use crate::params::RamseyParameters;
 use atomic_clocks::interferometer::{
-    Ramsey, RamseyResponse, RamseySignal, RamseySolver, RamseySolverConfig, RamseySolverError,
+    Ramsey, RamseyResponse, RamseySignal, RamseySolver, RamseySolverError,
 };
 use atomic_clocks::signal_processing::TransferFunctionSamples;
+use atomic_clocks::twolevel::TrotterConfig;
 
 const MAX_ANGULAR_FREQUENCY_STEP: f64 = 0.05;
+const PULSE_TAIL_WIDTHS: f64 = 4.0;
 
 pub(crate) fn angular_frequency_to_khz(angular_frequency: f64) -> f64 {
     angular_frequency / TAU
 }
 
 fn solver(params: &RamseyParameters) -> Result<RamseySolver, RamseySolverError> {
-    Ramsey {
+    let ramsey = Ramsey {
         pulse_area: params.pulse_area,
         detuning: TAU * params.detuning_khz,
         pulse_width: params.pulse_width_ms,
         pulse_separation: params.ramsey_time_ms,
         phase_diff: PI / 2.0,
-    }
-    .solver(RamseySolverConfig {
-        pulse_tail_widths: 4.0,
-        integration_steps: params.time_steps,
+    };
+    let tail_duration = PULSE_TAIL_WIDTHS * ramsey.pulse_width;
+    ramsey.solver(TrotterConfig {
+        start: -tail_duration,
+        stop: ramsey.pulse_separation + tail_duration,
+        nsteps: params.time_steps,
+        tolerance: 0.0,
     })
 }
 

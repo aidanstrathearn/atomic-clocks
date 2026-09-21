@@ -1,6 +1,5 @@
 pub mod ramsey;
 
 pub use ramsey::{
-    ModulatedRamsey, Ramsey, RamseyResponse, RamseySignal, RamseySolver, RamseySolverConfig,
-    RamseySolverError,
+    ModulatedRamsey, Ramsey, RamseyResponse, RamseySignal, RamseySolver, RamseySolverError,
 };

@@ -29,16 +29,11 @@ impl TimeDependentHamiltonian for Ramsey {
     }
 }
 
-
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum RamseySolverError {
     NonFiniteParameter(&'static str),
     NonPositivePulseWidth,
     NegativePulseSeparation,
-    NonPositivePulseTailWidths,
-    NoIntegrationSteps,
-    NonFiniteTimeWindow,
 }
 
 impl fmt::Display for RamseySolverError {
@@ -53,48 +48,16 @@ impl fmt::Display for RamseySolverError {
             Self::NegativePulseSeparation => {
                 write!(formatter, "Ramsey pulse separation must be nonnegative")
             }
-            Self::NonPositivePulseTailWidths => {
-                write!(formatter, "Ramsey pulse-tail cutoff must be positive")
-            }
-            Self::NoIntegrationSteps => {
-                write!(
-                    formatter,
-                    "Ramsey solver requires at least one integration step"
-                )
-            }
-            Self::NonFiniteTimeWindow => {
-                write!(formatter, "Ramsey solver time window must be finite")
-            }
         }
     }
 }
 
 impl Error for RamseySolverError {}
 
-
-#[derive(Clone, Copy, Debug)]
-pub struct RamseySolverConfig {
-    /// Number of pulse widths retained before the first pulse and after the second.
-    pub pulse_tail_widths: f64,
-    /// Number of uniform integration intervals across the retained time window.
-    pub integration_steps: usize,
-}
-
-impl Default for RamseySolverConfig {
-    fn default() -> Self {
-        Self {
-            pulse_tail_widths: 4.0,
-            integration_steps: 501,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct RamseySolver {
     ramsey: Ramsey,
-    config: RamseySolverConfig,
-    start: f64,
-    stop: f64,
+    trotter: TrotterConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -114,7 +77,7 @@ pub struct RamseyResponse {
 }
 
 impl Ramsey {
-    pub fn solver(self, config: RamseySolverConfig) -> Result<RamseySolver, RamseySolverError> {
+    pub fn solver(self, config: TrotterConfig) -> Result<RamseySolver, RamseySolverError> {
         for (name, value) in [
             ("pulse_area", self.pulse_area),
             ("detuning", self.detuning),
@@ -132,40 +95,17 @@ impl Ramsey {
         if self.pulse_separation < 0.0 {
             return Err(RamseySolverError::NegativePulseSeparation);
         }
-        if !config.pulse_tail_widths.is_finite() || config.pulse_tail_widths <= 0.0 {
-            return Err(RamseySolverError::NonPositivePulseTailWidths);
-        }
-        if config.integration_steps == 0 {
-            return Err(RamseySolverError::NoIntegrationSteps);
-        }
-
-        let tail_duration = config.pulse_tail_widths * self.pulse_width;
-        let start = -tail_duration;
-        let stop = self.pulse_separation + tail_duration;
-        if !start.is_finite() || !stop.is_finite() || !(stop - start).is_finite() {
-            return Err(RamseySolverError::NonFiniteTimeWindow);
-        }
+        config.validate();
         Ok(RamseySolver {
             ramsey: self,
-            config,
-            start,
-            stop,
+            trotter: config,
         })
     }
 }
 
 impl RamseySolver {
-    fn trotter_config(&self) -> TrotterConfig {
-        TrotterConfig {
-            start: self.start,
-            stop: self.stop,
-            nsteps: self.config.integration_steps,
-            tolerance: 0.0,
-        }
-    }
-
     fn final_ground_probability_for(&self, ramsey: &Ramsey) -> f64 {
-        let unitary = Unitary::from_system(ramsey, self.trotter_config());
+        let unitary = Unitary::from_system(ramsey, self.trotter);
         Observable::ground_projector().expectation(unitary.apply_to(BlochVec::ground()))
     }
 
@@ -192,8 +132,10 @@ impl RamseySolver {
         }
     }
 
+    /// Uses every interval in the configured time grid so that responses can be
+    /// evaluated at each boundary; the Trotter reduction tolerance is ignored.
     pub fn detuning_response(&self) -> RamseyResponse {
-        let times = Linspace::new(self.start, self.stop, self.config.integration_steps);
+        let times = Linspace::new(self.trotter.start, self.trotter.stop, self.trotter.nsteps);
         let perturbation = Hamiltonian::new(0.0, 0.0, 1.0);
         let values = Process::new(steps(&times.array, |t, dt| {
             self.ramsey.h(t).for_duration(dt)
@@ -207,7 +149,7 @@ impl RamseySolver {
             relative_times: times
                 .array
                 .into_iter()
-                .map(|time| time - self.stop)
+                .map(|time| time - self.trotter.stop)
                 .collect(),
             values,
             time_step: times.step,
@@ -227,8 +169,6 @@ impl RamseyResponse {
         ))
     }
 }
-
-
 
 pub struct ModulatedRamsey {
     pub pulse_area: f64,
@@ -267,6 +207,15 @@ mod tests {
         }
     }
 
+    fn trotter_config(nsteps: usize) -> TrotterConfig {
+        TrotterConfig {
+            start: -0.2,
+            stop: 2.2,
+            nsteps,
+            tolerance: 0.0,
+        }
+    }
+
     fn assert_close(actual: f64, expected: f64, tolerance: f64) {
         assert!(
             (actual - expected).abs() < tolerance * (1.0 + expected.abs()),
@@ -275,29 +224,27 @@ mod tests {
     }
 
     #[test]
-    fn solver_uses_the_configured_pulse_window_for_response() {
-        let config = RamseySolverConfig {
-            pulse_tail_widths: 3.0,
-            integration_steps: 80,
+    fn solver_uses_the_configured_time_window_for_response() {
+        let config = TrotterConfig {
+            start: -0.15,
+            stop: 2.15,
+            nsteps: 80,
+            tolerance: 0.0,
         };
         let model = ramsey();
         let response = model.solver(config).unwrap().detuning_response();
-        let duration = model.pulse_separation + 2.0 * config.pulse_tail_widths * model.pulse_width;
+        let duration = config.stop - config.start;
 
-        assert_eq!(response.relative_times.len(), config.integration_steps + 1);
+        assert_eq!(response.relative_times.len(), config.nsteps + 1);
         assert_eq!(response.values.len(), response.relative_times.len());
         assert_close(response.relative_times[0], -duration, 1.0e-14);
         assert_eq!(*response.relative_times.last().unwrap(), 0.0);
-        assert_close(
-            response.time_step,
-            duration / config.integration_steps as f64,
-            1.0e-14,
-        );
+        assert_close(response.time_step, duration / config.nsteps as f64, 1.0e-14);
     }
 
     #[test]
     fn signal_uses_angular_detunings_without_changing_the_solver_lock_point() {
-        let solver = ramsey().solver(RamseySolverConfig::default()).unwrap();
+        let solver = ramsey().solver(trotter_config(501)).unwrap();
         let detunings = [-0.7, 0.2, 1.4];
         let signal = solver.signal(&detunings);
 
@@ -315,12 +262,7 @@ mod tests {
 
     #[test]
     fn dc_response_matches_the_final_probability_detuning_slope() {
-        let solver = ramsey()
-            .solver(RamseySolverConfig {
-                integration_steps: 4_000,
-                ..RamseySolverConfig::default()
-            })
-            .unwrap();
+        let solver = ramsey().solver(trotter_config(4_000)).unwrap();
         let response = solver.detuning_response();
         let dc_response = response.transfer_function(1.0).unwrap().response_values()[0].re;
 
@@ -333,33 +275,15 @@ mod tests {
     }
 
     #[test]
-    fn solver_rejects_invalid_physics_and_sampling() {
+    fn solver_rejects_invalid_physics() {
         assert_eq!(
             Ramsey {
                 pulse_width: 0.0,
                 ..ramsey()
             }
-            .solver(RamseySolverConfig::default())
+            .solver(trotter_config(501))
             .unwrap_err(),
             RamseySolverError::NonPositivePulseWidth
-        );
-        assert_eq!(
-            ramsey()
-                .solver(RamseySolverConfig {
-                    pulse_tail_widths: f64::NAN,
-                    ..RamseySolverConfig::default()
-                })
-                .unwrap_err(),
-            RamseySolverError::NonPositivePulseTailWidths
-        );
-        assert_eq!(
-            ramsey()
-                .solver(RamseySolverConfig {
-                    integration_steps: 0,
-                    ..RamseySolverConfig::default()
-                })
-                .unwrap_err(),
-            RamseySolverError::NoIntegrationSteps
         );
     }
 }
