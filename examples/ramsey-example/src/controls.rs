@@ -1,7 +1,9 @@
 use crate::params::RamseyParameters;
-use crate::ramsey::{DETUNING_STEP_KHZ, detuning_limit_khz};
+use atomic_clocks::common::DetuningScanParams;
 use myplotlib::{Slider, SliderGrid, SliderGroup};
 use std::f64::consts::PI;
+
+const DETUNING_STEP_KHZ: f64 = 0.01;
 
 fn ramsey_sliders<'a>(
     pulse_width_ms: &'a mut f64,
@@ -29,9 +31,20 @@ fn ramsey_sliders<'a>(
 }
 
 fn prepare_detuning_slider(params: &mut RamseyParameters) -> f64 {
-    let limit = detuning_limit_khz(params.pulse_width_ms);
+    let limit = params.scan.hz_lim;
     params.detuning_khz = params.detuning_khz.clamp(-limit, limit);
     limit
+}
+
+fn scan_sliders(scan: &mut DetuningScanParams) -> SliderGroup<'_> {
+    SliderGroup::new(
+        "Scan",
+        [
+            Slider::new("Detuning half-range (kHz)", &mut scan.hz_lim, 0.01..=65.0)
+                .step_by(DETUNING_STEP_KHZ),
+            Slider::new("Detuning samples", &mut scan.hz_num, 2..=1_001),
+        ],
+    )
 }
 
 fn controller_sliders<'a>(
@@ -103,6 +116,34 @@ pub(crate) fn standard(params: &mut RamseyParameters) -> SliderGrid<'_> {
     )
 }
 
+pub(crate) fn signal(params: &mut RamseyParameters) -> SliderGrid<'_> {
+    let detuning_limit_khz = prepare_detuning_slider(params);
+    let RamseyParameters {
+        pulse_width_ms,
+        ramsey_time_ms,
+        pulse_area,
+        detuning_khz,
+        time_steps,
+        scan,
+        ..
+    } = params;
+
+    SliderGrid::new(
+        3,
+        [
+            ramsey_sliders(
+                pulse_width_ms,
+                ramsey_time_ms,
+                pulse_area,
+                detuning_khz,
+                time_steps,
+                detuning_limit_khz,
+            ),
+            scan_sliders(scan),
+        ],
+    )
+}
+
 pub(crate) fn feedback(params: &mut RamseyParameters) -> SliderGrid<'_> {
     let detuning_limit_khz = prepare_detuning_slider(params);
     let RamseyParameters {
@@ -116,6 +157,7 @@ pub(crate) fn feedback(params: &mut RamseyParameters) -> SliderGrid<'_> {
         measurement_white_psd_log10,
         integrator_gain,
         feedback_delay_ms,
+        ..
     } = params;
 
     SliderGrid::new(

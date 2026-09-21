@@ -1,9 +1,9 @@
+use atomic_clocks::common::DetuningScanParams;
 use atomic_clocks::maths::demodulation::ModulationParams;
 use atomic_clocks::maths::normalised_gaussian;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    DetuningScanParams, Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams,
-    compute_demod,
+    Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams, compute_demod,
 };
 
 use crate::app::Params;

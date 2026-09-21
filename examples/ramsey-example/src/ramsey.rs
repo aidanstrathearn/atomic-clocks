@@ -7,8 +7,6 @@ use atomic_clocks::interferometer::{
 use atomic_clocks::signal_processing::TransferFunctionSamples;
 
 const MAX_ANGULAR_FREQUENCY_STEP: f64 = 0.05;
-pub(crate) const DETUNING_STEP_KHZ: f64 = 0.01;
-const DETUNING_RANGE_FACTOR: f64 = 3.0;
 
 pub(crate) fn khz_to_angular_frequency(frequency_khz: f64) -> f64 {
     TAU * frequency_khz
@@ -16,15 +14,6 @@ pub(crate) fn khz_to_angular_frequency(frequency_khz: f64) -> f64 {
 
 pub(crate) fn angular_frequency_to_khz(angular_frequency: f64) -> f64 {
     angular_frequency / TAU
-}
-
-pub(crate) fn detuning_limit_khz(pulse_width_ms: f64) -> f64 {
-    assert!(
-        pulse_width_ms.is_finite() && pulse_width_ms > 0.0,
-        "pulse width must be finite and positive"
-    );
-    let raw_limit = angular_frequency_to_khz(DETUNING_RANGE_FACTOR / pulse_width_ms);
-    (raw_limit / DETUNING_STEP_KHZ).floor() * DETUNING_STEP_KHZ
 }
 
 fn solver(params: &RamseyParameters, detuning_khz: f64) -> Result<RamseySolver, RamseySolverError> {
@@ -78,10 +67,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detuning_slider_lattice_contains_zero() {
-        let limit = detuning_limit_khz(RamseyParameters::default().pulse_width_ms);
-        let snapped_zero = -limit + (limit / DETUNING_STEP_KHZ).round() * DETUNING_STEP_KHZ;
-        assert_eq!(snapped_zero, 0.0);
+    fn default_detuning_scan_contains_zero() {
+        let params = RamseyParameters::default();
+        let detunings = params.scan.offsets().unwrap();
+        assert_eq!(detunings.len(), params.scan.hz_num);
+        assert!(detunings[detunings.len() / 2].abs() < f64::EPSILON);
     }
 
     #[test]

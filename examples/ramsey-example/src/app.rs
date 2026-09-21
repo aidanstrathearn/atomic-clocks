@@ -6,7 +6,7 @@ use crate::{
 use myplotlib::{AppDefinition, ViewOption};
 
 const RAMSEY_VIEWS: &[ViewOption<RamseyParameters>] = &[
-    ViewOption::new("Ramsey signal", signal_plot::plot, controls::standard),
+    ViewOption::new("Ramsey signal", signal_plot::plot, controls::signal),
     ViewOption::new("Linear response", response_plot::plot, controls::standard),
     ViewOption::new(
         "Frequency response",
