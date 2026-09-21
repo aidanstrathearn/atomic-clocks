@@ -73,6 +73,16 @@ impl DetuningScanParams {
         }
         Ok(())
     }
+
+    /// Returns the detuning offsets in scan order.
+    pub fn offsets(&self) -> Result<Vec<f64>, String> {
+        self.validate()?;
+        if self.hz_num == 1 {
+            Ok(vec![-self.hz_lim])
+        } else {
+            Ok(linspace(-self.hz_lim, self.hz_lim, self.hz_num - 1))
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -223,17 +233,9 @@ pub fn compute_demod<const N: usize>(
     observable: Vec3,
     harmonics: [usize; N],
 ) -> Result<DemodOutput<N>, String> {
-    params.validate()?;
+    params.validate_propagation()?;
+    let hz_array = params.scan.offsets()?;
     let demodulator = Demodulator::from_validated(params, observable);
-    let hz_array = if params.scan.hz_num == 1 {
-        vec![-params.scan.hz_lim]
-    } else {
-        linspace(
-            -params.scan.hz_lim,
-            params.scan.hz_lim,
-            params.scan.hz_num - 1,
-        )
-    };
     let mut values = Vec::with_capacity(hz_array.len());
     for &hz_offset in &hz_array {
         values.push(demodulator.demodulate(hz_offset, harmonics)?);
