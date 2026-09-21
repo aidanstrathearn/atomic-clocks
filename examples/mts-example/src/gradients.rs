@@ -7,7 +7,6 @@ use rayon::prelude::*;
 
 use crate::app::{Params, common_control_groups};
 use crate::units::{angular_gradient_to_per_mhz, frequency_slider};
-use crate::velocity;
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     let gradient = SliderGroup::new(
@@ -28,9 +27,7 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
         &mut params.mts.solver.kr_n,
         &mut params.mts.solver.steps_per_period,
         &mut params.mts.solver.n_periods,
-        &mut params.kv_sigma,
-        &mut params.kv_window_half_width,
-        &mut params.kv_samples,
+        &mut params.velocity,
     );
     SliderGrid::new(5, common.into_iter().chain([gradient]))
 }
@@ -49,7 +46,7 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
         ));
     }
 
-    let samples = velocity::velocity_samples(params)?;
+    let samples = params.velocity_params().samples()?;
     let harmonics: Vec<_> = (0..=params.gradient_harmonics).collect();
     let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
 

@@ -2,14 +2,14 @@ use atomic_clocks::maths::demodulation::{Demodulation, ModulationParams};
 use atomic_clocks::maths::normalised_gaussian;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    DemodOutput, Frame, HamiltonianParams, MtsParams, MtsSolverParams, compute_demod,
+    DemodOutput, Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams,
+    compute_demod,
 };
 
 use crate::app::Params;
 use crate::gradients::{harmonic_gradients, normalised_adjacent_gradient_sums};
 use crate::probe::{MtsCurves, velocity_average};
 use crate::response::{response_at_velocity, response_output};
-use crate::velocity::velocity_samples;
 
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
@@ -127,55 +127,21 @@ fn small_params() -> Params {
             },
             ..MtsParams::default()
         },
-        kv_sigma: 2.0,
-        kv_window_half_width: 1.5,
-        kv_samples: 3,
+        velocity: VelocityParams {
+            sigma: 2.0,
+            half_width: 1.5,
+            sample_count: 3,
+            ..VelocityParams::default()
+        },
         ..Params::default()
     }
-}
-
-fn curves(output: &MtsCurves) -> [&[f64]; 4] {
-    [&output.amp0, &output.proj1, &output.proj2, &output.proj3]
-}
-
-#[test]
-fn gaussian_quadrature_uses_a_fixed_zero_centered_window() {
-    let params = small_params();
-    let samples = velocity_samples(&params).unwrap();
-    assert_eq!(samples.len(), 3);
-    assert_eq!(samples[0].kv, -1.0);
-    assert_eq!(samples[1].kv, 0.0);
-    assert_eq!(samples[2].kv, 1.0);
-    for sample in samples {
-        assert_close(
-            sample.weight,
-            normalised_gaussian(sample.kv, 0.0, 2.0),
-            1e-15,
-        );
-    }
-}
-
-#[test]
-fn quadrature_retains_the_gaussian_mass_inside_the_window() {
-    let params = Params {
-        kv_sigma: 1.0,
-        kv_window_half_width: 1.0,
-        kv_samples: 1_000,
-        ..Params::default()
-    };
-    let mass: f64 = velocity_samples(&params)
-        .unwrap()
-        .iter()
-        .map(|sample| sample.weight)
-        .sum();
-    assert_close(mass, 0.682_689_492_137, 1e-6);
 }
 
 #[test]
 fn weighted_signal_matches_serial_signed_coefficients() {
     let params = small_params();
     let average = velocity_average(&params).unwrap();
-    let samples = velocity_samples(&params).unwrap();
+    let samples = params.velocity_params().samples().unwrap();
     let reference: Vec<_> = samples
         .iter()
         .map(|sample| (sample.weight, demod_at_velocity(&params, sample.kv)))
@@ -192,14 +158,21 @@ fn weighted_signal_matches_serial_signed_coefficients() {
                 })
                 .fold((0.0, 0.0), |sum, value| (sum.0 + value.0, sum.1 + value.1))
         };
-        let dc = sum(|output| &output.dc);
-        let harmonic = sum(|output| &output.harmonic);
-        let second = sum(|output| &output.second_harmonic);
-        let third = sum(|output| &output.third_harmonic);
-        assert_close(average.amp0[index], dc.0.hypot(dc.1) / 2.0, 1e-12);
-        assert_close(average.proj1[index], harmonic.0, 1e-12);
-        assert_close(average.proj2[index], second.0, 1e-12);
-        assert_close(average.proj3[index], third.0, 1e-12);
+        for (actual, expected) in [
+            (&average.dc[index], sum(|output| &output.dc)),
+            (&average.harmonic[index], sum(|output| &output.harmonic)),
+            (
+                &average.second_harmonic[index],
+                sum(|output| &output.second_harmonic),
+            ),
+            (
+                &average.third_harmonic[index],
+                sum(|output| &output.third_harmonic),
+            ),
+        ] {
+            assert_close(actual.in_phase, expected.0, 1e-12);
+            assert_close(actual.quadrature, expected.1, 1e-12);
+        }
     }
 }
 
@@ -222,13 +195,12 @@ fn harmonic_gradients_match_the_plotted_in_phase_signal_slopes() {
     let gradients = harmonic_gradients(&params).unwrap();
     let signal = velocity_average(&params).unwrap();
 
-    for (actual, values) in
-        gradients
-            .into_iter()
-            .skip(1)
-            .zip([signal.proj1, signal.proj2, signal.proj3])
-    {
-        let expected = (values[1] - values[0]) / (2.0 * epsilon);
+    for (actual, values) in gradients.into_iter().skip(1).zip([
+        signal.harmonic,
+        signal.second_harmonic,
+        signal.third_harmonic,
+    ]) {
+        let expected = (values[1].in_phase - values[0].in_phase) / (2.0 * epsilon);
         assert_close(actual, expected, 1e-12);
     }
 }
@@ -276,7 +248,7 @@ fn weighted_response_matches_serial_kernels() {
         ..small_params()
     };
     let sum = response_output(&params).unwrap();
-    let samples = velocity_samples(&params).unwrap();
+    let samples = params.velocity_params().samples().unwrap();
     let reference: Vec<_> = samples
         .iter()
         .map(|sample| {
@@ -316,9 +288,12 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
             },
             ..Default::default()
         },
-        kv_sigma: sigma,
-        kv_window_half_width: 1.5,
-        kv_samples: 3,
+        velocity: VelocityParams {
+            sigma,
+            half_width: 1.5,
+            sample_count: 3,
+            ..VelocityParams::default()
+        },
         ..Default::default()
     };
     assert_eq!(params.probe_hamiltonian(0.0).modulation.shift, 0.0);
@@ -327,7 +302,7 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
         relative_delta + shift / 2.0,
         1e-15,
     );
-    for sample in velocity_samples(&params).unwrap() {
+    for sample in params.velocity_params().samples().unwrap() {
         assert_close(
             sample.weight,
             normalised_gaussian(sample.kv, shift / 2.0, sigma),
@@ -418,9 +393,12 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
             },
             ..Default::default()
         },
-        kv_sigma: 2.0,
-        kv_window_half_width: 1.5,
-        kv_samples: 5,
+        velocity: VelocityParams {
+            sigma: 2.0,
+            half_width: 1.5,
+            sample_count: 5,
+            ..VelocityParams::default()
+        },
         response_delay_periods: 6,
         ..Params::default()
     };
@@ -434,36 +412,25 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
         })
         .sum::<f64>();
     let signal = velocity_average(&params).unwrap();
-    let slope = (signal.proj1[2] - signal.proj1[0]) / (2.0 * epsilon);
+    let slope = (signal.harmonic[2].in_phase - signal.harmonic[0].in_phase) / (2.0 * epsilon);
     assert_close(integral, slope, 2e-5);
-}
-
-#[test]
-fn rejects_invalid_gaussian_quadrature() {
-    for params in [
-        Params {
-            kv_sigma: 0.0,
-            ..Params::default()
-        },
-        Params {
-            kv_window_half_width: 0.0,
-            ..Params::default()
-        },
-        Params {
-            kv_samples: 0,
-            ..Params::default()
-        },
-    ] {
-        assert!(velocity_samples(&params).is_err());
-    }
 }
 
 #[test]
 fn default_velocity_scan_is_finite() {
     let params = Params::default();
     let average = velocity_average(&params).unwrap();
-    for values in curves(&average) {
+    for values in [
+        &average.dc,
+        &average.harmonic,
+        &average.second_harmonic,
+        &average.third_harmonic,
+    ] {
         assert_eq!(values.len(), params.mts.solver.hz_num);
-        assert!(values.iter().all(|value| value.is_finite()));
+        assert!(
+            values
+                .iter()
+                .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite())
+        );
     }
 }

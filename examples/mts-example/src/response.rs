@@ -10,7 +10,6 @@ use rayon::prelude::*;
 
 use crate::app::{Params, common_control_groups};
 use crate::units::to_mhz;
-use crate::velocity;
 
 const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
 
@@ -46,9 +45,7 @@ fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
         &mut params.mts.solver.kr_n,
         &mut params.mts.solver.steps_per_period,
         &mut params.mts.solver.n_periods,
-        &mut params.kv_sigma,
-        &mut params.kv_window_half_width,
-        &mut params.kv_samples,
+        &mut params.velocity,
     );
     SliderGrid::new(5, common.into_iter().chain([response]))
 }
@@ -105,7 +102,7 @@ fn add_response(
 }
 
 pub(super) fn response_output(params: &Params) -> Result<LinearResponseOutput, String> {
-    let samples = velocity::velocity_samples(params)?;
+    let samples = params.velocity_params().samples()?;
 
     // Bound retained matrices by the worker count, and retain a fixed sample/chunk
     // order so floating-point sums do not depend on scheduling.

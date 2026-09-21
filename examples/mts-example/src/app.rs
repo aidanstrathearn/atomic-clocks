@@ -1,6 +1,8 @@
 use atomic_clocks::maths::demodulation::ModulationParams;
 use atomic_clocks::twolevel::Decay;
-use atomic_clocks::vapourcell::{Frame, HamiltonianParams, LinearResponseSolverParams, MtsParams};
+use atomic_clocks::vapourcell::{
+    Frame, HamiltonianParams, LinearResponseSolverParams, MtsParams, VelocityParams,
+};
 use myplotlib::{AppDefinition, Slider, SliderGroup, ViewOption};
 
 use crate::units::frequency_slider;
@@ -8,9 +10,7 @@ use crate::{gradients, probe, response, velocity};
 
 pub(crate) struct Params {
     pub(super) mts: MtsParams,
-    pub(super) kv_sigma: f64,
-    pub(super) kv_window_half_width: f64,
-    pub(super) kv_samples: usize,
+    pub(super) velocity: VelocityParams,
     pub(super) gradient_epsilon: f64,
     pub(super) gradient_harmonics: usize,
     pub(super) response_time_fraction: f64,
@@ -21,9 +21,7 @@ impl Default for Params {
     fn default() -> Self {
         Self {
             mts: MtsParams::default(),
-            kv_sigma: 10.0,
-            kv_window_half_width: 0.01,
-            kv_samples: 1,
+            velocity: VelocityParams::default(),
             gradient_epsilon: 1e-3,
             gradient_harmonics: 10,
             response_time_fraction: 0.0,
@@ -33,6 +31,15 @@ impl Default for Params {
 }
 
 impl Params {
+    /// Returns the physical velocity distribution in coordinates centred on
+    /// the velocity class selected by the carrier shift.
+    pub(super) fn velocity_params(&self) -> VelocityParams {
+        VelocityParams {
+            mean: self.mts.hamiltonian.modulation.shift / 2.0,
+            ..self.velocity
+        }
+    }
+
     /// Returns the probe-frame Hamiltonian in coordinates centred on the
     /// velocity class selected by the carrier shift.
     pub(super) fn probe_hamiltonian(&self, kv: f64) -> HamiltonianParams {
@@ -81,9 +88,7 @@ pub(super) fn common_control_groups<'a>(
     kr_n: &'a mut usize,
     steps_per_period: &'a mut usize,
     n_periods: &'a mut usize,
-    kv_sigma: &'a mut f64,
-    kv_window_half_width: &'a mut f64,
-    kv_samples: &'a mut usize,
+    velocity_params: &'a mut VelocityParams,
 ) -> [SliderGroup<'a>; 4] {
     hamiltonian.delta = 0.0;
     hamiltonian.kv = 0.0;
@@ -97,7 +102,7 @@ pub(super) fn common_control_groups<'a>(
         &mut decay.gamma_down,
         &mut decay.gamma_phi,
     );
-    let velocity = velocity::control_group(kv_sigma, kv_window_half_width, kv_samples);
+    let velocity = velocity::control_group(velocity_params);
     let solver = SliderGroup::new(
         "Solver",
         [

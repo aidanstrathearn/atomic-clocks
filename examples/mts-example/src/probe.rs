@@ -7,7 +7,6 @@ use rayon::prelude::*;
 
 use crate::app::{Params, common_control_groups};
 use crate::units::{frequency_slider, to_mhz};
-use crate::velocity;
 
 /// Scalar curves derived from one combined demodulation output for plotting.
 pub(super) struct MtsCurves {
@@ -89,9 +88,7 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
         &mut params.mts.solver.kr_n,
         &mut params.mts.solver.steps_per_period,
         &mut params.mts.solver.n_periods,
-        &mut params.kv_sigma,
-        &mut params.kv_window_half_width,
-        &mut params.kv_samples,
+        &mut params.velocity,
     );
     SliderGrid::new(5, common.into_iter().chain([scan]))
 }
@@ -131,8 +128,8 @@ fn add_demod_output(sum: &mut DemodOutput, output: DemodOutput, weight: f64) -> 
     Ok(())
 }
 
-pub(super) fn velocity_average(params: &Params) -> Result<MtsCurves, String> {
-    let samples = velocity::velocity_samples(params)?;
+pub(super) fn velocity_average(params: &Params) -> Result<DemodOutput, String> {
+    let samples = params.velocity_params().samples()?;
     let probe = MtsParams {
         hamiltonian: params.probe_hamiltonian(0.0),
         ..params.mts
@@ -162,10 +159,10 @@ pub(super) fn velocity_average(params: &Params) -> Result<MtsCurves, String> {
     for (weight, output) in outputs {
         add_demod_output(&mut average, output, weight)?;
     }
-    Ok(MtsCurves::from(average))
+    Ok(average)
 }
 
 pub(super) fn plot(params: &mut Params) -> AppResult {
-    let output = velocity_average(params)?;
+    let output = MtsCurves::from(velocity_average(params)?);
     Ok(signal_plot(&params.mts, &output))
 }
