@@ -76,8 +76,8 @@ fn signal_plot(params: &MtsParams, output: &MtsCurves) -> Plotter {
     plot.xlabel("Detuning (MHz)");
     plot.ylabel("Demodulated signal");
     plot.xlim(
-        to_mhz(display_detuning(params, -params.solver.hz_lim)),
-        to_mhz(display_detuning(params, params.solver.hz_lim)),
+        to_mhz(display_detuning(params, -params.scan.hz_lim)),
+        to_mhz(display_detuning(params, params.scan.hz_lim)),
     );
     plot
 }
@@ -87,7 +87,7 @@ pub(super) fn display_detuning(params: &MtsParams, detuning: f64) -> f64 {
 }
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
-    let scan = scan_control_group(&mut params.mts.solver.hz_lim, &mut params.mts.solver.hz_num);
+    let scan = scan_control_group(&mut params.mts.scan.hz_lim, &mut params.mts.scan.hz_num);
     let common = common_control_groups(
         &mut params.mts.hamiltonian,
         &mut params.mts.decay,

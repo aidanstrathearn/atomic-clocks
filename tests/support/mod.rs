@@ -46,6 +46,8 @@ pub fn current_params(params: &mts_reference::MtsParams) -> current::MtsParams {
             kr_n: params.kr_n,
             steps_per_period: params.steps_per_period,
             n_periods: params.n_periods,
+        },
+        scan: current::DetuningScanParams {
             hz_lim: params.hz_lim,
             hz_num: params.hz_num,
         },

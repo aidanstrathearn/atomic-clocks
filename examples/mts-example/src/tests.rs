@@ -2,7 +2,8 @@ use atomic_clocks::maths::demodulation::ModulationParams;
 use atomic_clocks::maths::normalised_gaussian;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams, compute_demod,
+    DetuningScanParams, Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams,
+    compute_demod,
 };
 
 use crate::app::Params;
@@ -53,6 +54,8 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
                         kr_n: 16,
                         steps_per_period,
                         n_periods: 13,
+                    },
+                    scan: DetuningScanParams {
                         hz_lim: epsilon,
                         hz_num: 3,
                     },
@@ -119,11 +122,13 @@ fn small_params() -> Params {
                 ..HamiltonianParams::default()
             },
             solver: MtsSolverParams {
-                hz_num: 7,
                 kr_n: 3,
                 steps_per_period: 40,
                 n_periods: 2,
-                ..MtsSolverParams::default()
+            },
+            scan: DetuningScanParams {
+                hz_num: 7,
+                ..DetuningScanParams::default()
             },
             ..MtsParams::default()
         },
@@ -170,10 +175,10 @@ fn harmonic_gradients_match_the_plotted_in_phase_signal_slopes() {
     let epsilon = 1e-4;
     let params = Params {
         mts: MtsParams {
-            solver: MtsSolverParams {
+            scan: DetuningScanParams {
                 hz_lim: epsilon,
                 hz_num: 2,
-                ..small_params().mts.solver
+                ..small_params().mts.scan
             },
             ..small_params().mts
         },
@@ -298,10 +303,12 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
     }
 
     let solver = MtsSolverParams {
-        hz_num: 5,
         kr_n: 3,
         steps_per_period: 40,
         n_periods: 3,
+    };
+    let scan = DetuningScanParams {
+        hz_num: 5,
         ..Default::default()
     };
     for shifted_kv in [-0.8, 0.2, 1.1] {
@@ -322,6 +329,7 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
                 ..Default::default()
             },
             solver,
+            scan,
             ..Default::default()
         };
         let zero_shift = MtsParams {
@@ -379,6 +387,8 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
                 kr_n: 8,
                 steps_per_period: 128,
                 n_periods: 13,
+            },
+            scan: DetuningScanParams {
                 hz_lim: epsilon,
                 hz_num: 3,
             },
@@ -412,7 +422,7 @@ fn default_velocity_scan_is_finite() {
     let params = Params::default();
     let average = velocity_average(&params).unwrap();
     assert_eq!(average.harmonics, SIGNAL_HARMONICS);
-    assert_eq!(average.values.len(), params.mts.solver.hz_num);
+    assert_eq!(average.values.len(), params.mts.scan.hz_num);
     assert!(
         average
             .values

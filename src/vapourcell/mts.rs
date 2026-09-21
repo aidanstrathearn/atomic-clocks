@@ -8,15 +8,13 @@ use crate::twolevel::{
 
 use super::hamiltonian::HamiltonianParams;
 
-/// Spatial sampling, integration grid, and detuning scan settings for MTS.
+/// Spatial sampling and integration grid settings for MTS.
 #[derive(Clone, Copy, Debug)]
 pub struct MtsSolverParams {
     pub kr_n: usize,
     /// Integration intervals per modulation period; the final window has one more sample.
     pub steps_per_period: usize,
     pub n_periods: usize,
-    pub hz_lim: f64,
-    pub hz_num: usize,
 }
 
 impl Default for MtsSolverParams {
@@ -25,20 +23,13 @@ impl Default for MtsSolverParams {
             kr_n: 5,
             steps_per_period: 100,
             n_periods: 3,
-            hz_lim: 5.0,
-            hz_num: 50,
         }
     }
 }
 
 impl MtsSolverParams {
-    /// Validates spatial sampling, integration, and detuning scan settings.
+    /// Validates spatial sampling and integration settings.
     pub fn validate(&self) -> Result<(), String> {
-        self.validate_propagation()?;
-        self.validate_scan()
-    }
-
-    fn validate_propagation(&self) -> Result<(), String> {
         if self.kr_n == 0 {
             return Err("kr_n must be positive".to_string());
         }
@@ -54,8 +45,26 @@ impl MtsSolverParams {
             .ok_or("MTS time grid is too large")?;
         Ok(())
     }
+}
 
-    fn validate_scan(&self) -> Result<(), String> {
+/// Detuning offsets sampled around the Hamiltonian's central detuning.
+#[derive(Clone, Copy, Debug)]
+pub struct DetuningScanParams {
+    pub hz_lim: f64,
+    pub hz_num: usize,
+}
+
+impl Default for DetuningScanParams {
+    fn default() -> Self {
+        Self {
+            hz_lim: 5.0,
+            hz_num: 50,
+        }
+    }
+}
+
+impl DetuningScanParams {
+    pub fn validate(&self) -> Result<(), String> {
         if self.hz_num == 0 {
             return Err("hz_num must be positive".to_string());
         }
@@ -71,6 +80,7 @@ pub struct MtsParams {
     pub hamiltonian: HamiltonianParams,
     pub decay: Decay,
     pub solver: MtsSolverParams,
+    pub scan: DetuningScanParams,
 }
 
 impl Default for MtsParams {
@@ -83,21 +93,22 @@ impl Default for MtsParams {
                 gamma_phi: 0.0,
             },
             solver: MtsSolverParams::default(),
+            scan: DetuningScanParams::default(),
         }
     }
 }
 
 impl MtsParams {
-    /// Validates the Hamiltonian, decay, and solver configuration.
+    /// Validates the Hamiltonian, decay, solver, and detuning scan configuration.
     pub fn validate(&self) -> Result<(), String> {
         self.validate_propagation()?;
-        self.solver.validate_scan()
+        self.scan.validate()
     }
 
     fn validate_propagation(&self) -> Result<(), String> {
         self.hamiltonian.validate()?;
         self.decay.validate()?;
-        self.solver.validate_propagation()
+        self.solver.validate()
     }
 }
 
@@ -194,7 +205,7 @@ impl Demodulator {
 /// Unlike [`compute_demod`], this evaluates only `hamiltonian.delta` rather than
 /// building a detuning scan. Harmonics are returned in the same order as the
 /// supplied indices. The observable and lock-in conventions match
-/// [`compute_demod`]. The solver's `hz_lim` and `hz_num` scan settings are ignored.
+/// [`compute_demod`]. The detuning scan settings are ignored.
 pub fn compute_demod_harmonics(
     params: &MtsParams,
     observable: Vec3,
@@ -214,13 +225,13 @@ pub fn compute_demod<const N: usize>(
 ) -> Result<DemodOutput<N>, String> {
     params.validate()?;
     let demodulator = Demodulator::from_validated(params, observable);
-    let hz_array = if params.solver.hz_num == 1 {
-        vec![-params.solver.hz_lim]
+    let hz_array = if params.scan.hz_num == 1 {
+        vec![-params.scan.hz_lim]
     } else {
         linspace(
-            -params.solver.hz_lim,
-            params.solver.hz_lim,
-            params.solver.hz_num - 1,
+            -params.scan.hz_lim,
+            params.scan.hz_lim,
+            params.scan.hz_num - 1,
         )
     };
     let mut values = Vec::with_capacity(hz_array.len());
@@ -335,10 +346,10 @@ mod tests {
                 SIGNAL_HARMONICS,
             )
             .expect("default scan succeeds");
-            assert_eq!(output.hz.len(), params.solver.hz_num);
+            assert_eq!(output.hz.len(), params.scan.hz_num);
             assert_eq!(output.harmonics, SIGNAL_HARMONICS);
             assert!(output.hz.iter().all(|value| value.is_finite()));
-            assert_eq!(output.values.len(), params.solver.hz_num);
+            assert_eq!(output.values.len(), params.scan.hz_num);
             assert!(
                 output
                     .values
@@ -357,6 +368,8 @@ mod tests {
                 kr_n: 3,
                 steps_per_period: 40,
                 n_periods: 2,
+            },
+            scan: DetuningScanParams {
                 hz_lim: 0.0,
                 hz_num: 1,
             },
@@ -386,10 +399,9 @@ mod tests {
     #[test]
     fn exact_demodulation_does_not_require_scan_settings() {
         let params = MtsParams {
-            solver: MtsSolverParams {
+            scan: DetuningScanParams {
                 hz_lim: f64::NAN,
                 hz_num: 0,
-                ..MtsSolverParams::default()
             },
             ..MtsParams::default()
         };
@@ -459,8 +471,10 @@ mod tests {
                         kr_n: 1,
                         n_periods: periods,
                         steps_per_period: 8,
+                    },
+                    scan: DetuningScanParams {
                         hz_num: 3,
-                        ..MtsSolverParams::default()
+                        ..DetuningScanParams::default()
                     },
                 };
                 let output = compute_demod(&params, observable, SIGNAL_HARMONICS).unwrap();
@@ -521,9 +535,10 @@ mod tests {
                         kr_n: 1,
                         n_periods: 1,
                         steps_per_period: steps,
+                    },
+                    scan: DetuningScanParams {
                         hz_lim: 0.0,
                         hz_num: 1,
-                        ..MtsSolverParams::default()
                     },
                 },
                 Vec3::from_angles(PI / 2.0, PI / 2.0),
