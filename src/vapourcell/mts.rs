@@ -197,7 +197,7 @@ pub fn compute_demod<const N: usize>(
     harmonics: [usize; N],
 ) -> Result<DemodOutput<N>, String> {
     params.validate_propagation()?;
-    let hz_array = params.scan.offsets()?;
+    let hz_array = params.scan.angular_offsets()?;
     let demodulator = Demodulator::from_validated(params, observable);
     let values = hz_array
         .iter()

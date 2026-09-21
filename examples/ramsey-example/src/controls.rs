@@ -1,7 +1,7 @@
 use crate::params::RamseyParameters;
 use atomic_clocks::common::DetuningScanParams;
 use myplotlib::{Slider, SliderGrid, SliderGroup};
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 const DETUNING_STEP_KHZ: f64 = 0.01;
 
@@ -31,18 +31,28 @@ fn ramsey_sliders<'a>(
 }
 
 fn prepare_detuning_slider(params: &mut RamseyParameters) -> f64 {
-    let limit = params.scan.hz_lim;
+    let limit = params.scan.frequency_half_range();
     params.detuning_khz = params.detuning_khz.clamp(-limit, limit);
     limit
 }
 
 fn scan_sliders(scan: &mut DetuningScanParams) -> SliderGroup<'_> {
+    let DetuningScanParams { hz_lim, hz_num } = scan;
     SliderGroup::new(
         "Scan",
         [
-            Slider::new("Detuning half-range (kHz)", &mut scan.hz_lim, 0.01..=65.0)
-                .step_by(DETUNING_STEP_KHZ),
-            Slider::new("Detuning samples", &mut scan.hz_num, 2..=1_001),
+            Slider::from_get_set(
+                "Detuning half-range (kHz)",
+                0.01..=65.0,
+                move |frequency_khz| {
+                    if let Some(frequency_khz) = frequency_khz {
+                        *hz_lim = TAU * frequency_khz;
+                    }
+                    *hz_lim / TAU
+                },
+            )
+            .step_by(DETUNING_STEP_KHZ),
+            Slider::new("Detuning samples", hz_num, 2..=1_001),
         ],
     )
 }

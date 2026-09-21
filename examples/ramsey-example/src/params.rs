@@ -1,4 +1,4 @@
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 use atomic_clocks::common::DetuningScanParams;
 
@@ -25,7 +25,7 @@ impl Default for RamseyParameters {
             detuning_khz: 0.0,
             time_steps: 501,
             scan: DetuningScanParams {
-                hz_lim: 10.0,
+                hz_lim: TAU * 10.0,
                 hz_num: 501,
             },
             oscillator_white_psd_log10: -4.0,

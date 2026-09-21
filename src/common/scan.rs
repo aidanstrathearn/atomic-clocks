@@ -1,8 +1,11 @@
+use std::f64::consts::TAU;
+
 use crate::maths::linspace;
 
-/// Detuning offsets sampled around a central detuning.
+/// Angular-frequency detuning offsets sampled around a central detuning.
 #[derive(Clone, Copy, Debug)]
 pub struct DetuningScanParams {
+    /// Angular-frequency half-range in radians per model time unit.
     pub hz_lim: f64,
     pub hz_num: usize,
 }
@@ -27,13 +30,27 @@ impl DetuningScanParams {
         Ok(())
     }
 
-    /// Returns the detuning offsets in scan order.
-    pub fn offsets(&self) -> Result<Vec<f64>, String> {
+    /// Returns angular-frequency detuning offsets in scan order.
+    pub fn angular_offsets(&self) -> Result<Vec<f64>, String> {
         self.validate()?;
         if self.hz_num == 1 {
             Ok(vec![-self.hz_lim])
         } else {
             Ok(linspace(-self.hz_lim, self.hz_lim, self.hz_num - 1))
         }
+    }
+
+    /// Returns ordinary-frequency detuning offsets in cycles per model time unit.
+    pub fn frequency_offsets(&self) -> Result<Vec<f64>, String> {
+        Ok(self
+            .angular_offsets()?
+            .into_iter()
+            .map(|offset| offset / TAU)
+            .collect())
+    }
+
+    /// Returns the ordinary-frequency half-range in cycles per model time unit.
+    pub fn frequency_half_range(&self) -> f64 {
+        self.hz_lim / TAU
     }
 }

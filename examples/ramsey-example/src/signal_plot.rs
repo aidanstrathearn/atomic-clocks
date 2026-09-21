@@ -3,8 +3,7 @@ use crate::ramsey::signal;
 use myplotlib::{AppResult, Plotter};
 
 pub(crate) fn plot(params: &mut RamseyParameters) -> AppResult {
-    let detunings_khz = params.scan.offsets()?;
-    let signal = signal(params, &detunings_khz)?;
+    let signal = signal(params)?;
 
     let mut plot = Plotter::new();
     plot.plot(&signal.detunings, &signal.ground_probabilities)
@@ -14,6 +13,7 @@ pub(crate) fn plot(params: &mut RamseyParameters) -> AppResult {
     plot.title("Ramsey signal");
     plot.xlabel("Detuning (kHz)");
     plot.ylabel("Final ground-state probability");
-    plot.xlim(-params.scan.hz_lim, params.scan.hz_lim);
+    let detuning_limit = params.scan.frequency_half_range();
+    plot.xlim(-detuning_limit, detuning_limit);
     Ok(plot)
 }
