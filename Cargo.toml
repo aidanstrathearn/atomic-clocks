@@ -26,3 +26,6 @@ harness = false
 [[bench]]
 name = "mts_ab"
 harness = false
+
+[patch."https://github.com/aidanstrathearn/myplotlib.git"]
+myplotlib = { path = "../myplotlib" }

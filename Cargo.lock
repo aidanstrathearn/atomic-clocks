@@ -1395,7 +1395,6 @@ dependencies = [
 [[package]]
 name = "myplotlib"
 version = "0.1.0"
-source = "git+https://github.com/aidanstrathearn/myplotlib.git?tag=v0.1.0#0869376192f4730b4ae749df0e3b5a330b42bddc"
 dependencies = [
  "eframe",
  "egui_plot",
