@@ -1,5 +1,6 @@
 //! Hamiltonian evolution and unitary channel construction.
 
+use crate::maths::Linspace;
 use crate::maths::mat3::Mat3;
 use crate::maths::vec3::Vec3;
 
@@ -30,8 +31,15 @@ impl TrotterConfig {
         );
     }
 
-    fn dt(self) -> f64 {
-        (self.stop - self.start) / self.nsteps as f64
+    /// Returns the `nsteps + 1` boundaries of the configured time grid.
+    pub fn time_grid(self) -> Linspace {
+        self.validate();
+        Linspace::new(self.start, self.stop, self.nsteps)
+    }
+
+    fn intervals(self) -> impl ExactSizeIterator<Item = (f64, f64)> {
+        let dt = (self.stop - self.start) / self.nsteps as f64;
+        (0..self.nsteps).map(move |i| (self.start + i as f64 * dt, dt))
     }
 }
 
@@ -59,21 +67,19 @@ impl Unitary {
     }
 
     fn direct_compose(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
-        let dt = config.dt();
-        Process::new((0..config.nsteps).map(|i| {
-            let t = config.start + i as f64 * dt;
-            system.h(t).for_duration(dt)
-        }))
+        Process::new(
+            config
+                .intervals()
+                .map(|(t, dt)| system.h(t).for_duration(dt)),
+        )
         .compose()
     }
 
     fn reduced_compose(system: &impl TimeDependentHamiltonian, config: TrotterConfig) -> Self {
-        let dt = config.dt();
         let threshold = 4.0 * (config.tolerance / config.nsteps as f64);
         let mut total = Self::identity();
         let mut pending = Hamiltonian::default();
-        for i in 0..config.nsteps {
-            let t = config.start + i as f64 * dt;
+        for (t, dt) in config.intervals() {
             let action = Hamiltonian {
                 r: system.h(t).r * dt,
             };

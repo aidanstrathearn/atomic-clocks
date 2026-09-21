@@ -23,7 +23,13 @@ fn propagation_covers_exactly_the_requested_intervals() {
     }
 
     for nsteps in [1, 2, 80] {
-        let times = Linspace::new(-1.0, 1.0, nsteps);
+        let times = TrotterConfig {
+            start: -1.0,
+            stop: 1.0,
+            nsteps,
+            tolerance: 0.0,
+        }
+        .time_grid();
         assert_eq!(times.array.len(), nsteps + 1);
         assert_eq!(
             times.array,

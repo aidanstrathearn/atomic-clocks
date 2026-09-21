@@ -1,6 +1,6 @@
 use std::{error::Error, fmt};
 
-use crate::maths::{Linspace, normalised_gaussian, past_response_transform};
+use crate::maths::{normalised_gaussian, past_response_transform};
 use crate::signal_processing::{SpectrumError, TransferFunctionSamples};
 use crate::twolevel::{
     BlochVec, Channel, Hamiltonian, Observable, Process, TimeDependentHamiltonian, TrotterConfig,
@@ -153,7 +153,7 @@ impl RamseySolver {
     /// Uses every interval in the configured time grid so that responses can be
     /// evaluated at each boundary; the Trotter reduction tolerance is ignored.
     pub fn detuning_response(&self) -> RamseyResponse {
-        let times = Linspace::new(self.trotter.start, self.trotter.stop, self.trotter.nsteps);
+        let times = self.trotter.time_grid();
         let perturbation = Hamiltonian::new(0.0, 0.0, 1.0);
         let values = Process::new(steps(&times.array, |t, dt| {
             self.ramsey.h(t).for_duration(dt)
