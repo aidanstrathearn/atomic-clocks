@@ -34,6 +34,11 @@ impl Default for MtsSolverParams {
 impl MtsSolverParams {
     /// Validates spatial sampling, integration, and detuning scan settings.
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_propagation()?;
+        self.validate_scan()
+    }
+
+    fn validate_propagation(&self) -> Result<(), String> {
         if self.kr_n == 0 {
             return Err("kr_n must be positive".to_string());
         }
@@ -43,16 +48,20 @@ impl MtsSolverParams {
         if self.steps_per_period == 0 {
             return Err("steps_per_period must be positive".to_string());
         }
+        self.n_periods
+            .checked_mul(self.steps_per_period)
+            .and_then(|steps| steps.checked_add(1))
+            .ok_or("MTS time grid is too large")?;
+        Ok(())
+    }
+
+    fn validate_scan(&self) -> Result<(), String> {
         if self.hz_num == 0 {
             return Err("hz_num must be positive".to_string());
         }
         if !self.hz_lim.is_finite() || self.hz_lim < 0.0 {
             return Err("hz_lim must be finite and nonnegative".to_string());
         }
-        self.n_periods
-            .checked_mul(self.steps_per_period)
-            .and_then(|steps| steps.checked_add(1))
-            .ok_or("MTS time grid is too large")?;
         Ok(())
     }
 }
@@ -81,9 +90,14 @@ impl Default for MtsParams {
 impl MtsParams {
     /// Validates the Hamiltonian, decay, and solver configuration.
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_propagation()?;
+        self.solver.validate_scan()
+    }
+
+    fn validate_propagation(&self) -> Result<(), String> {
         self.hamiltonian.validate()?;
         self.decay.validate()?;
-        self.solver.validate()
+        self.solver.validate_propagation()
     }
 }
 
@@ -102,33 +116,95 @@ pub struct DemodOutput {
     pub third_harmonic: Vec<Demodulation>,
 }
 
+struct Demodulator {
+    params: MtsParams,
+    observable: Vec3,
+    time_grid: Vec<f64>,
+    last_period_start: usize,
+    spatial_phases: Vec<f64>,
+}
+
+impl Demodulator {
+    fn new(params: &MtsParams, observable: Vec3) -> Result<Self, String> {
+        params.validate_propagation()?;
+        Ok(Self::from_validated(params, observable))
+    }
+
+    fn from_validated(params: &MtsParams, observable: Vec3) -> Self {
+        Self {
+            params: *params,
+            observable,
+            time_grid: time_grid(
+                params.hamiltonian.modulation.period(),
+                params.solver.steps_per_period,
+                params.solver.n_periods,
+            ),
+            last_period_start: (params.solver.n_periods - 1) * params.solver.steps_per_period,
+            spatial_phases: spatial_phases(params),
+        }
+    }
+
+    fn projected_at_offset(&self, hz_offset: f64) -> Vec<f64> {
+        let mut projected = vec![0.0; self.params.solver.steps_per_period + 1];
+        for &kr_phase in &self.spatial_phases {
+            let atom = HamiltonianParams {
+                delta: self.params.hamiltonian.delta + hz_offset,
+                kr: kr_phase,
+                ..self.params.hamiltonian
+            };
+            accumulate_projected_trajectory(
+                &atom,
+                self.params.decay,
+                &self.time_grid,
+                self.last_period_start,
+                self.observable,
+                &mut projected,
+            );
+        }
+
+        let kr_scale = 1.0 / self.spatial_phases.len() as f64;
+        for value in &mut projected {
+            *value *= kr_scale;
+        }
+        projected
+    }
+
+    fn demodulate<const N: usize>(
+        &self,
+        hz_offset: f64,
+        harmonics: [usize; N],
+    ) -> Result<[Demodulation; N], String> {
+        validate_harmonics(&harmonics, self.params.solver.steps_per_period)?;
+        let projected = self.projected_at_offset(hz_offset);
+        Ok(harmonics.map(|harmonic| lockin_period(&projected, harmonic)))
+    }
+
+    fn demodulate_harmonics(
+        &self,
+        hz_offset: f64,
+        harmonics: &[usize],
+    ) -> Result<Vec<Demodulation>, String> {
+        validate_harmonics(harmonics, self.params.solver.steps_per_period)?;
+        let projected = self.projected_at_offset(hz_offset);
+        Ok(harmonics
+            .iter()
+            .map(|&harmonic| lockin_period(&projected, harmonic))
+            .collect())
+    }
+}
+
 /// Demodulates selected harmonics at the Hamiltonian's exact detuning.
 ///
 /// Unlike [`compute_demod`], this evaluates only `hamiltonian.delta` rather than
 /// building a detuning scan. Harmonics are returned in the same order as the
 /// supplied indices. The observable and lock-in conventions match
-/// [`compute_demod`].
+/// [`compute_demod`]. The solver's `hz_lim` and `hz_num` scan settings are ignored.
 pub fn compute_demod_harmonics(
     params: &MtsParams,
     observable: Vec3,
     harmonics: &[usize],
 ) -> Result<Vec<Demodulation>, String> {
-    params.validate()?;
-    validate_harmonics(harmonics, params.solver.steps_per_period)?;
-
-    let t_array = time_grid(
-        params.hamiltonian.modulation.period(),
-        params.solver.steps_per_period,
-        params.solver.n_periods,
-    );
-    let last_start = (params.solver.n_periods - 1) * params.solver.steps_per_period;
-    let kr_array = spatial_phases(params);
-    let projected = projected_period(params, observable, 0.0, &t_array, last_start, &kr_array);
-
-    Ok(harmonics
-        .iter()
-        .map(|&harmonic| lockin_period(&projected, harmonic))
-        .collect())
+    Demodulator::new(params, observable)?.demodulate_harmonics(0.0, harmonics)
 }
 
 /// Demodulates the expectation of `observable · sigma` in the selected frame.
@@ -136,12 +212,8 @@ pub fn compute_demod_harmonics(
 /// scales the measured signal.
 pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput, String> {
     params.validate()?;
-
-    let t_array = time_grid(
-        params.hamiltonian.modulation.period(),
-        params.solver.steps_per_period,
-        params.solver.n_periods,
-    );
+    let demodulator = Demodulator::from_validated(params, observable);
+    const HARMONICS: [usize; 4] = [0, 1, 2, 3];
     let hz_array = if params.solver.hz_num == 1 {
         vec![-params.solver.hz_lim]
     } else {
@@ -151,23 +223,22 @@ pub fn compute_demod(params: &MtsParams, observable: Vec3) -> Result<DemodOutput
             params.solver.hz_num - 1,
         )
     };
-    let last_start = (params.solver.n_periods - 1) * params.solver.steps_per_period;
-    let kr_array = spatial_phases(params);
-
     let mut dc = Vec::with_capacity(hz_array.len());
     let mut harmonic = Vec::with_capacity(hz_array.len());
     let mut second_harmonic = Vec::with_capacity(hz_array.len());
     let mut third_harmonic = Vec::with_capacity(hz_array.len());
 
     for &hz_offset in &hz_array {
-        let projected = projected_period(
-            params, observable, hz_offset, &t_array, last_start, &kr_array,
-        );
-
-        dc.push(lockin_period(&projected, 0));
-        harmonic.push(lockin_period(&projected, 1));
-        second_harmonic.push(lockin_period(&projected, 2));
-        third_harmonic.push(lockin_period(&projected, 3));
+        let [
+            dc_value,
+            harmonic_value,
+            second_harmonic_value,
+            third_harmonic_value,
+        ] = demodulator.demodulate(hz_offset, HARMONICS)?;
+        dc.push(dc_value);
+        harmonic.push(harmonic_value);
+        second_harmonic.push(second_harmonic_value);
+        third_harmonic.push(third_harmonic_value);
     }
 
     Ok(DemodOutput {
@@ -197,38 +268,6 @@ fn spatial_phases(params: &MtsParams) -> Vec<f64> {
         .skip(1)
         .map(|phase| phase + params.hamiltonian.kr)
         .collect()
-}
-
-fn projected_period(
-    params: &MtsParams,
-    observable: Vec3,
-    hz_offset: f64,
-    t_array: &[f64],
-    last_start: usize,
-    kr_array: &[f64],
-) -> Vec<f64> {
-    let mut projected = vec![0.0; params.solver.steps_per_period + 1];
-    for &kr_phase in kr_array {
-        let atom = HamiltonianParams {
-            delta: params.hamiltonian.delta + hz_offset,
-            kr: kr_phase,
-            ..params.hamiltonian
-        };
-        accumulate_projected_trajectory(
-            &atom,
-            params.decay,
-            t_array,
-            last_start,
-            observable,
-            &mut projected,
-        );
-    }
-
-    let kr_scale = 1.0 / kr_array.len() as f64;
-    for value in &mut projected {
-        *value *= kr_scale;
-    }
-    projected
 }
 
 fn time_grid(period: f64, steps_per_period: usize, n_periods: usize) -> Vec<f64> {
@@ -333,7 +372,12 @@ mod tests {
         };
         let observable = Vec3::from_angles(PI / 2.0, PI / 2.0);
         let output = compute_demod(&params, observable).unwrap();
-        let selected = compute_demod_harmonics(&params, observable, &[3, 1, 0, 2, 4]).unwrap();
+        let harmonics = [3, 1, 0, 2, 4];
+        let selected = compute_demod_harmonics(&params, observable, &harmonics).unwrap();
+        let fixed = Demodulator::new(&params, observable)
+            .unwrap()
+            .demodulate(0.0, harmonics)
+            .unwrap();
         let expected = [
             output.third_harmonic[0],
             output.harmonic[0],
@@ -345,8 +389,34 @@ mod tests {
             assert_eq!(actual.in_phase, expected.in_phase);
             assert_eq!(actual.quadrature, expected.quadrature);
         }
+        for (actual, expected) in fixed.iter().zip(&selected) {
+            assert_eq!(actual.in_phase, expected.in_phase);
+            assert_eq!(actual.quadrature, expected.quadrature);
+        }
         assert!(selected[4].in_phase.is_finite());
         assert!(selected[4].quadrature.is_finite());
+    }
+
+    #[test]
+    fn exact_demodulation_does_not_require_scan_settings() {
+        let params = MtsParams {
+            solver: MtsSolverParams {
+                hz_lim: f64::NAN,
+                hz_num: 0,
+                ..MtsSolverParams::default()
+            },
+            ..MtsParams::default()
+        };
+        let observable = Vec3::from_angles(PI / 2.0, PI / 2.0);
+
+        let output = compute_demod_harmonics(&params, observable, &[0, 1]).unwrap();
+        assert_eq!(output.len(), 2);
+        assert!(
+            output
+                .iter()
+                .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite())
+        );
+        assert!(compute_demod(&params, observable).is_err());
     }
 
     #[test]
