@@ -16,22 +16,20 @@ pub struct Ramsey {
     pub phase_diff: f64,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct RamseySolverConfig {
-    /// Number of pulse widths retained before the first pulse and after the second.
-    pub pulse_tail_widths: f64,
-    /// Number of uniform integration intervals across the retained time window.
-    pub integration_steps: usize,
-}
-
-impl Default for RamseySolverConfig {
-    fn default() -> Self {
-        Self {
-            pulse_tail_widths: 4.0,
-            integration_steps: 501,
-        }
+impl TimeDependentHamiltonian for Ramsey {
+    fn h(&self, t: f64) -> Hamiltonian {
+        let (sin_phi, cos_phi) = self.phase_diff.sin_cos();
+        let pulse1 = normalised_gaussian(t, 0.0, self.pulse_width);
+        let pulse2 = normalised_gaussian(t, self.pulse_separation, self.pulse_width);
+        Hamiltonian::new(
+            self.pulse_area * (pulse1 + pulse2 * cos_phi),
+            self.pulse_area * pulse2 * sin_phi,
+            self.detuning,
+        )
     }
 }
+
+
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RamseySolverError {
@@ -72,6 +70,24 @@ impl fmt::Display for RamseySolverError {
 }
 
 impl Error for RamseySolverError {}
+
+
+#[derive(Clone, Copy, Debug)]
+pub struct RamseySolverConfig {
+    /// Number of pulse widths retained before the first pulse and after the second.
+    pub pulse_tail_widths: f64,
+    /// Number of uniform integration intervals across the retained time window.
+    pub integration_steps: usize,
+}
+
+impl Default for RamseySolverConfig {
+    fn default() -> Self {
+        Self {
+            pulse_tail_widths: 4.0,
+            integration_steps: 501,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct RamseySolver {
@@ -212,18 +228,7 @@ impl RamseyResponse {
     }
 }
 
-impl TimeDependentHamiltonian for Ramsey {
-    fn h(&self, t: f64) -> Hamiltonian {
-        let (sin_phi, cos_phi) = self.phase_diff.sin_cos();
-        let pulse1 = normalised_gaussian(t, 0.0, self.pulse_width);
-        let pulse2 = normalised_gaussian(t, self.pulse_separation, self.pulse_width);
-        Hamiltonian::new(
-            self.pulse_area * (pulse1 + pulse2 * cos_phi),
-            self.pulse_area * pulse2 * sin_phi,
-            self.detuning,
-        )
-    }
-}
+
 
 pub struct ModulatedRamsey {
     pub pulse_area: f64,
