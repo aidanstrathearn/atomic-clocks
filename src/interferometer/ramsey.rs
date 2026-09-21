@@ -30,13 +30,13 @@ impl TimeDependentHamiltonian for Ramsey {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum RamseySolverError {
+pub enum RamseyError {
     NonFiniteParameter(&'static str),
     NonPositivePulseWidth,
     NegativePulseSeparation,
 }
 
-impl fmt::Display for RamseySolverError {
+impl fmt::Display for RamseyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NonFiniteParameter(parameter) => {
@@ -52,7 +52,7 @@ impl fmt::Display for RamseySolverError {
     }
 }
 
-impl Error for RamseySolverError {}
+impl Error for RamseyError {}
 
 #[derive(Clone, Copy, Debug)]
 pub struct RamseySolver {
@@ -90,7 +90,7 @@ impl RamseyResponse {
 }
 
 impl Ramsey {
-    pub fn solver(self, config: TrotterConfig) -> Result<RamseySolver, RamseySolverError> {
+    pub fn validate(&self) -> Result<(), RamseyError> {
         for (name, value) in [
             ("pulse_area", self.pulse_area),
             ("detuning", self.detuning),
@@ -99,15 +99,20 @@ impl Ramsey {
             ("phase_diff", self.phase_diff),
         ] {
             if !value.is_finite() {
-                return Err(RamseySolverError::NonFiniteParameter(name));
+                return Err(RamseyError::NonFiniteParameter(name));
             }
         }
         if self.pulse_width <= 0.0 {
-            return Err(RamseySolverError::NonPositivePulseWidth);
+            return Err(RamseyError::NonPositivePulseWidth);
         }
         if self.pulse_separation < 0.0 {
-            return Err(RamseySolverError::NegativePulseSeparation);
+            return Err(RamseyError::NegativePulseSeparation);
         }
+
+        Ok(())
+    }
+    pub fn solver(self, config: TrotterConfig) -> Result<RamseySolver, RamseyError> {
+        self.validate()?;
         config.validate();
         Ok(RamseySolver {
             ramsey: self,
@@ -169,8 +174,6 @@ impl RamseySolver {
         }
     }
 }
-
-
 
 pub struct ModulatedRamsey {
     pub pulse_area: f64,
@@ -285,7 +288,7 @@ mod tests {
             }
             .solver(trotter_config(501))
             .unwrap_err(),
-            RamseySolverError::NonPositivePulseWidth
+            RamseyError::NonPositivePulseWidth
         );
     }
 }

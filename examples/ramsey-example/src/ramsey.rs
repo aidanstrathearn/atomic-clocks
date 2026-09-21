@@ -5,7 +5,7 @@ use std::{
 
 use crate::params::RamseyParameters;
 use atomic_clocks::interferometer::{
-    Ramsey, RamseyResponse, RamseySignal, RamseySolver, RamseySolverError,
+    Ramsey, RamseyError, RamseyResponse, RamseySignal, RamseySolver,
 };
 use atomic_clocks::signal_processing::TransferFunctionSamples;
 use atomic_clocks::twolevel::TrotterConfig;
@@ -17,7 +17,7 @@ pub(crate) fn angular_frequency_to_khz(angular_frequency: f64) -> f64 {
     angular_frequency / TAU
 }
 
-fn solver(params: &RamseyParameters) -> Result<RamseySolver, RamseySolverError> {
+fn solver(params: &RamseyParameters) -> Result<RamseySolver, RamseyError> {
     let ramsey = Ramsey {
         pulse_area: params.pulse_area,
         detuning: TAU * params.detuning_khz,
@@ -41,9 +41,7 @@ pub(crate) fn signal(params: &RamseyParameters) -> Result<RamseySignal, Box<dyn 
     Ok(signal)
 }
 
-pub(crate) fn temporal_response(
-    params: &RamseyParameters,
-) -> Result<RamseyResponse, RamseySolverError> {
+pub(crate) fn temporal_response(params: &RamseyParameters) -> Result<RamseyResponse, RamseyError> {
     let mut response = solver(params)?.detuning_response();
     // Convert response per angular-detuning impulse to response per kHz ms impulse.
     for value in &mut response.values {
