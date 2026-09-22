@@ -70,7 +70,7 @@ pub struct LinearResponseOutput {
     pub times: Vec<f64>,
     /// Delays from 0 to `delay_periods * T`, including both endpoints.
     pub delays: Vec<f64>,
-    /// `response[i][j] = chi(times[i], times[i] - delays[j])`.
+    /// Raw `response[i][j] = chi(times[i], times[i] - delays[j])`.
     /// These are signed kick responses, without time-integration weights.
     pub response: Vec<Vec<f64>>,
 }
@@ -89,34 +89,38 @@ impl LinearResponseOutput {
     /// Panics if the response dimensions do not match the axes or there are fewer
     /// than two observation times.
     pub fn demodulate(&self, harmonic: usize) -> Vec<Demodulation> {
-        assert!(
-            self.times.len() >= 2,
-            "lock-in requires at least two samples"
-        );
-        assert_eq!(
-            self.response.len(),
-            self.times.len(),
-            "response must match observation times"
-        );
-        assert!(
-            self.response
-                .iter()
-                .all(|row| row.len() == self.delays.len()),
-            "response rows must match delays",
-        );
-        let mut column = vec![0.0; self.times.len()];
-        (0..self.delays.len())
-            .map(|delay| {
-                for (sample, row) in column.iter_mut().zip(&self.response) {
-                    *sample = row[delay];
-                }
-                lockin_period(&column, harmonic)
-            })
-            .collect()
+        demodulate_response(&self.times, &self.delays, &self.response, harmonic)
     }
 }
 
-/// Spatially averages the response of `observable · sigma` to a change in `delta`.
+pub(super) fn demodulate_response(
+    times: &[f64],
+    delays: &[f64],
+    response: &[Vec<f64>],
+    harmonic: usize,
+) -> Vec<Demodulation> {
+    assert!(times.len() >= 2, "lock-in requires at least two samples");
+    assert_eq!(
+        response.len(),
+        times.len(),
+        "response must match observation times"
+    );
+    assert!(
+        response.iter().all(|row| row.len() == delays.len()),
+        "response rows must match delays",
+    );
+    let mut column = vec![0.0; times.len()];
+    (0..delays.len())
+        .map(|delay| {
+            for (sample, row) in column.iter_mut().zip(response) {
+                *sample = row[delay];
+            }
+            lockin_period(&column, harmonic)
+        })
+        .collect()
+}
+
+/// Spatially averages the raw response of `observable · sigma` to a change in `delta`.
 /// Uses exactly `atom.hamiltonian.kv` and `atom.hamiltonian.delta`, with no detuning
 /// scan or velocity averaging. The observable is constant in the Hamiltonian frame and its
 /// magnitude scales the result. Use `(0, 1, 0)` to match the MTS example.

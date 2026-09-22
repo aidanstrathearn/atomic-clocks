@@ -83,7 +83,16 @@ impl MtsParams {
     }
 }
 
-/// Demodulated values for a detuning scan.
+/// The raw spatially averaged observable over the final modulation period.
+#[derive(Clone, Debug)]
+pub struct RawSignalOutput {
+    /// Times relative to the start of the final observation window.
+    pub times: Vec<f64>,
+    /// Expectations of `observable · sigma` at each time.
+    pub values: Vec<f64>,
+}
+
+/// Raw demodulated observable values for a detuning scan.
 #[derive(Clone, Debug)]
 pub struct DemodOutput<const N: usize> {
     /// Detuning offsets relative to the Hamiltonian's `delta`.
@@ -149,6 +158,21 @@ impl Demodulator {
         projected
     }
 
+    fn raw_signal(&self, hz_offset: f64) -> Result<RawSignalOutput, String> {
+        if !hz_offset.is_finite() {
+            return Err("detuning offset must be finite".to_string());
+        }
+        let period = self.params.atom.hamiltonian.modulation.period();
+        let steps = self.params.solver.steps_per_period;
+        let times = (0..=steps)
+            .map(|i| i as f64 * period / steps as f64)
+            .collect();
+        Ok(RawSignalOutput {
+            times,
+            values: self.projected_at_offset(hz_offset),
+        })
+    }
+
     fn demodulate<const N: usize>(
         &self,
         hz_offset: f64,
@@ -173,7 +197,21 @@ impl Demodulator {
     }
 }
 
-/// Demodulates selected harmonics at the Hamiltonian's exact detuning.
+/// Computes the raw expectation of `observable · sigma` over the final period.
+///
+/// The result uses the same warmup, spatial-phase average, and observation
+/// window as [`compute_demod`]. `hz_offset` is added to the Hamiltonian's
+/// `delta`. Returned times run from zero to one modulation period relative to
+/// the start of that final window. The detuning scan settings are ignored.
+pub fn compute_raw_signal(
+    params: &MtsParams,
+    observable: Vec3,
+    hz_offset: f64,
+) -> Result<RawSignalOutput, String> {
+    Demodulator::new(params, observable)?.raw_signal(hz_offset)
+}
+
+/// Demodulates raw observable harmonics at the Hamiltonian's exact detuning.
 ///
 /// Unlike [`compute_demod`], this evaluates only `hamiltonian.delta` rather than
 /// building a detuning scan. Harmonics are returned in the same order as the
@@ -187,7 +225,7 @@ pub fn compute_demod_harmonics(
     Demodulator::new(params, observable)?.demodulate_harmonics(0.0, harmonics)
 }
 
-/// Demodulates the expectation of `observable · sigma` in the selected frame.
+/// Demodulates the raw expectation of `observable · sigma` in the selected frame.
 /// The observable is constant in that frame and is not normalized; its magnitude
 /// scales the measured signal. Harmonics are returned in the same order as the
 /// supplied indices.
@@ -358,6 +396,50 @@ mod tests {
         }
         assert!(selected[4].in_phase.is_finite());
         assert!(selected[4].quadrature.is_finite());
+    }
+
+    #[test]
+    fn raw_signal_reproduces_exact_detuning_harmonics() {
+        let params = MtsParams {
+            solver: MtsSolverParams {
+                kr_n: 3,
+                steps_per_period: 40,
+                n_periods: 2,
+            },
+            scan: DetuningScanParams {
+                hz_lim: f64::NAN,
+                hz_num: 0,
+            },
+            ..MtsParams::default()
+        };
+        let observable = Vec3::from_angles(PI / 2.0, PI / 2.0);
+        let harmonics = [0, 1, 3, 7];
+        let raw = compute_raw_signal(&params, observable, 0.0).unwrap();
+        let demodulated = compute_demod_harmonics(&params, observable, &harmonics).unwrap();
+
+        assert_eq!(raw.times.len(), params.solver.steps_per_period + 1);
+        assert_eq!(raw.values.len(), raw.times.len());
+        assert_eq!(raw.times[0], 0.0);
+        assert_eq!(
+            raw.times[params.solver.steps_per_period],
+            params.atom.hamiltonian.modulation.period()
+        );
+        for (&harmonic, expected) in harmonics.iter().zip(demodulated) {
+            let actual = lockin_period(&raw.values, harmonic);
+            assert_eq!(actual.in_phase, expected.in_phase);
+            assert_eq!(actual.quadrature, expected.quadrature);
+        }
+    }
+
+    #[test]
+    fn raw_signal_rejects_a_non_finite_detuning_offset() {
+        let error = compute_raw_signal(
+            &MtsParams::default(),
+            Vec3::from_angles(PI / 2.0, PI / 2.0),
+            f64::NAN,
+        )
+        .unwrap_err();
+        assert_eq!(error, "detuning offset must be finite");
     }
 
     #[test]
