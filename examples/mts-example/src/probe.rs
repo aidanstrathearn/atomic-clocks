@@ -1,7 +1,9 @@
 use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::twolevel::Vec3;
-use atomic_clocks::vapourcell::{DemodOutput, HamiltonianParams, MtsParams, compute_demod};
+use atomic_clocks::vapourcell::{
+    DemodOutput, DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod,
+};
 use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
@@ -83,14 +85,14 @@ fn signal_plot(params: &MtsParams, output: &MtsCurves) -> Plotter {
 }
 
 pub(super) fn display_detuning(params: &MtsParams, detuning: f64) -> f64 {
-    detuning + params.hamiltonian.modulation.shift / 2.0
+    detuning + params.atom.hamiltonian.modulation.shift / 2.0
 }
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     let scan = scan_control_group(&mut params.mts.scan.hz_lim, &mut params.mts.scan.hz_num);
     let common = common_control_groups(
-        &mut params.mts.hamiltonian,
-        &mut params.mts.decay,
+        &mut params.mts.atom.hamiltonian,
+        &mut params.mts.atom.decay,
         &mut params.mts.solver.kr_n,
         &mut params.mts.solver.steps_per_period,
         &mut params.mts.solver.n_periods,
@@ -131,7 +133,10 @@ fn add_demod_output<const N: usize>(
 pub(super) fn velocity_average(params: &Params) -> Result<SignalOutput, String> {
     let samples = params.velocity_params().samples()?;
     let probe = MtsParams {
-        hamiltonian: params.probe_hamiltonian(0.0),
+        atom: DrivenAtomParams {
+            hamiltonian: params.probe_hamiltonian(0.0),
+            ..params.mts.atom
+        },
         ..params.mts
     };
 
@@ -141,9 +146,12 @@ pub(super) fn velocity_average(params: &Params) -> Result<SignalOutput, String> 
         .map(|sample| {
             compute_demod(
                 &MtsParams {
-                    hamiltonian: HamiltonianParams {
-                        kv: sample.kv,
-                        ..probe.hamiltonian
+                    atom: DrivenAtomParams {
+                        hamiltonian: HamiltonianParams {
+                            kv: sample.kv,
+                            ..probe.atom.hamiltonian
+                        },
+                        ..probe.atom
                     },
                     ..probe
                 },

@@ -3,7 +3,7 @@ use std::f64::consts::PI;
 use atomic_clocks::maths::fourier_transform;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
+    DrivenAtomParams, LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
 };
 use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
@@ -40,8 +40,8 @@ fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
         )]),
     );
     let common = common_control_groups(
-        &mut params.mts.hamiltonian,
-        &mut params.mts.decay,
+        &mut params.mts.atom.hamiltonian,
+        &mut params.mts.atom.decay,
         &mut params.mts.solver.kr_n,
         &mut params.mts.solver.steps_per_period,
         &mut params.mts.solver.n_periods,
@@ -60,7 +60,10 @@ pub(super) fn response_at_velocity(
         .n_periods
         .checked_sub(1)
         .ok_or("MTS period count must be positive")?;
-    let atom = params.probe_hamiltonian(kv);
+    let atom = DrivenAtomParams {
+        hamiltonian: params.probe_hamiltonian(kv),
+        ..params.mts.atom
+    };
     let solver = LinearResponseSolverParams {
         kr_n: params.mts.solver.kr_n,
         steps_per_period: params.mts.solver.steps_per_period,
@@ -69,7 +72,6 @@ pub(super) fn response_at_velocity(
     };
     compute_linear_response(
         &atom,
-        params.mts.decay,
         &solver,
         Vec3 {
             x: 0.0,
@@ -156,7 +158,7 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     plot.ylabel("C(t, t - τ): σy response to σz / 2");
     plot.xlim(
         0.0,
-        params.response_delay_periods as f64 * params.mts.hamiltonian.modulation.period(),
+        params.response_delay_periods as f64 * params.mts.atom.hamiltonian.modulation.period(),
     );
     Ok(plot)
 }
@@ -196,14 +198,14 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
     plot.ylabel("Demodulated σy response to σz / 2");
     plot.xlim(
         0.0,
-        params.response_delay_periods as f64 * params.mts.hamiltonian.modulation.period(),
+        params.response_delay_periods as f64 * params.mts.atom.hamiltonian.modulation.period(),
     );
     Ok(plot)
 }
 
 pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
     let output = response_output(params)?;
-    let atom = &params.mts.hamiltonian;
+    let atom = &params.mts.atom.hamiltonian;
     let step = atom.modulation.period() / params.mts.solver.steps_per_period as f64;
     let mut plot = Plotter::new();
     for (harmonic, label) in [

@@ -1,58 +1,5 @@
-use std::f64::consts::PI;
-
 use crate::maths::demodulation::ModulationParams;
-use crate::twolevel::{Hamiltonian, TimeDependentHamiltonian};
-
-/// Speed of light in vacuum, in metres per second (exact SI value).
-const SPEED_OF_LIGHT: f64 = 299_792_458.0;
-/// Planck constant, in joule-seconds (exact SI value).
-const PLANCK_CONSTANT: f64 = 6.626_070_15e-34;
-
-/// Saturation intensity in watts per square metre for a closed two-level transition.
-/// `angular_linewidth_per_s` is the population-decay linewidth Γ in radians per second.
-fn saturation_intensity(angular_linewidth_per_s: f64, wavelength_m: f64) -> f64 {
-    PI / 3.0 * PLANCK_CONSTANT * SPEED_OF_LIGHT * angular_linewidth_per_s / wavelength_m.powi(3)
-}
-
-pub struct Laser {
-    pub power_milliwatts: f64,
-    pub waist_radius_mm: f64,
-    pub wavelength_nm: f64,
-}
-
-impl Laser {
-    /// On-axis peak intensity for a Gaussian beam whose waist is its 1/e² radius.
-    pub fn intensity_watts_per_m2(&self) -> f64 {
-        let power_watts = self.power_milliwatts * 1e-3;
-        let waist_m = self.waist_radius_mm * 1e-3;
-        2.0 * power_watts / (PI * waist_m.powi(2))
-    }
-
-    /// Energy of one photon at the laser wavelength.
-    pub fn photon_energy_joules(&self) -> f64 {
-        let wavelength_m = self.wavelength_nm * 1e-9;
-        PLANCK_CONSTANT * SPEED_OF_LIGHT / wavelength_m
-    }
-}
-
-pub struct Atoms {
-    pub density_per_m3: f64,
-    pub transition_wavelength_nm: f64,
-    pub transition_linewidth_hz: f64,
-}
-
-impl Atoms {
-    /// Resonant single-atom Rabi angular frequency for the laser intensity.
-    pub fn rabi_freq_radians_per_s(&self, laser: &Laser) -> f64 {
-        let angular_linewidth_per_s = 2.0 * PI * self.transition_linewidth_hz;
-        let transition_wavelength_m = self.transition_wavelength_nm * 1e-9;
-        let saturation_intensity =
-            saturation_intensity(angular_linewidth_per_s, transition_wavelength_m);
-
-        angular_linewidth_per_s
-            * (laser.intensity_watts_per_m2() / (2.0 * saturation_intensity)).sqrt()
-    }
-}
+use crate::twolevel::{Decay, Hamiltonian, Liouvillian, TimeDependentHamiltonian};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Frame {
@@ -117,6 +64,28 @@ impl HamiltonianParams {
             return Err("Hamiltonian coefficients must be finite".to_string());
         }
         Ok(())
+    }
+}
+
+/// Time-dependent Hamiltonian and fixed dissipative rates for one driven atom.
+#[derive(Clone, Copy, Debug)]
+pub struct DrivenAtomParams {
+    pub hamiltonian: HamiltonianParams,
+    pub decay: Decay,
+}
+
+impl DrivenAtomParams {
+    pub fn validate(&self) -> Result<(), String> {
+        self.hamiltonian.validate()?;
+        self.decay.validate()
+    }
+
+    /// Returns the instantaneous Liouvillian at model time `t`.
+    pub fn liouvillian_at(&self, t: f64) -> Liouvillian {
+        Liouvillian {
+            hamiltonian: self.hamiltonian.h(t),
+            decay: self.decay,
+        }
     }
 }
 

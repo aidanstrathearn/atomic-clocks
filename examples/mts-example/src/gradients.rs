@@ -1,7 +1,9 @@
 use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::twolevel::Vec3;
-use atomic_clocks::vapourcell::{HamiltonianParams, MtsParams, compute_demod_harmonics};
+use atomic_clocks::vapourcell::{
+    DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod_harmonics,
+};
 use myplotlib::{AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
@@ -22,8 +24,8 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
         ],
     );
     let common = common_control_groups(
-        &mut params.mts.hamiltonian,
-        &mut params.mts.decay,
+        &mut params.mts.atom.hamiltonian,
+        &mut params.mts.atom.decay,
         &mut params.mts.solver.kr_n,
         &mut params.mts.solver.steps_per_period,
         &mut params.mts.solver.n_periods,
@@ -57,9 +59,12 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
             let at_offset = |offset| {
                 compute_demod_harmonics(
                     &MtsParams {
-                        hamiltonian: HamiltonianParams {
-                            delta: params.mts.hamiltonian.delta + offset,
-                            ..params.probe_hamiltonian(sample.kv)
+                        atom: DrivenAtomParams {
+                            hamiltonian: HamiltonianParams {
+                                delta: params.mts.atom.hamiltonian.delta + offset,
+                                ..params.probe_hamiltonian(sample.kv)
+                            },
+                            ..params.mts.atom
                         },
                         ..params.mts
                     },

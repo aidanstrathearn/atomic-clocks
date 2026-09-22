@@ -3,11 +3,9 @@ use std::f64::consts::PI;
 use crate::common::DetuningScanParams;
 use crate::maths::demodulation::{Demodulation, lockin_period};
 use crate::maths::linspace;
-use crate::twolevel::{
-    BlochVec, Decay, Liouvillian, Process, TimeDependentHamiltonian, Vec3, steps,
-};
+use crate::twolevel::{BlochVec, Decay, Process, Vec3, steps};
 
-use super::hamiltonian::HamiltonianParams;
+use super::hamiltonian::{DrivenAtomParams, HamiltonianParams};
 
 /// Spatial sampling and integration grid settings for MTS.
 #[derive(Clone, Copy, Debug)]
@@ -50,8 +48,7 @@ impl MtsSolverParams {
 
 #[derive(Clone, Copy, Debug)]
 pub struct MtsParams {
-    pub hamiltonian: HamiltonianParams,
-    pub decay: Decay,
+    pub atom: DrivenAtomParams,
     pub solver: MtsSolverParams,
     pub scan: DetuningScanParams,
 }
@@ -59,11 +56,13 @@ pub struct MtsParams {
 impl Default for MtsParams {
     fn default() -> Self {
         Self {
-            hamiltonian: HamiltonianParams::default(),
-            decay: Decay {
-                gamma_up: 0.0,
-                gamma_down: 1.0,
-                gamma_phi: 0.0,
+            atom: DrivenAtomParams {
+                hamiltonian: HamiltonianParams::default(),
+                decay: Decay {
+                    gamma_up: 0.0,
+                    gamma_down: 1.0,
+                    gamma_phi: 0.0,
+                },
             },
             solver: MtsSolverParams::default(),
             scan: DetuningScanParams::default(),
@@ -79,8 +78,7 @@ impl MtsParams {
     }
 
     fn validate_propagation(&self) -> Result<(), String> {
-        self.hamiltonian.validate()?;
-        self.decay.validate()?;
+        self.atom.validate()?;
         self.solver.validate()
     }
 }
@@ -115,7 +113,7 @@ impl Demodulator {
             params: *params,
             observable,
             time_grid: time_grid(
-                params.hamiltonian.modulation.period(),
+                params.atom.hamiltonian.modulation.period(),
                 params.solver.steps_per_period,
                 params.solver.n_periods,
             ),
@@ -127,14 +125,16 @@ impl Demodulator {
     fn projected_at_offset(&self, hz_offset: f64) -> Vec<f64> {
         let mut projected = vec![0.0; self.params.solver.steps_per_period + 1];
         for &kr_phase in &self.spatial_phases {
-            let atom = HamiltonianParams {
-                delta: self.params.hamiltonian.delta + hz_offset,
-                kr: kr_phase,
-                ..self.params.hamiltonian
+            let atom = DrivenAtomParams {
+                hamiltonian: HamiltonianParams {
+                    delta: self.params.atom.hamiltonian.delta + hz_offset,
+                    kr: kr_phase,
+                    ..self.params.atom.hamiltonian
+                },
+                ..self.params.atom
             };
             accumulate_projected_trajectory(
                 &atom,
-                self.params.decay,
                 &self.time_grid,
                 self.last_period_start,
                 self.observable,
@@ -227,7 +227,7 @@ fn spatial_phases(params: &MtsParams) -> Vec<f64> {
     linspace(0.0, 2.0 * PI, params.solver.kr_n)
         .into_iter()
         .skip(1)
-        .map(|phase| phase + params.hamiltonian.kr)
+        .map(|phase| phase + params.atom.hamiltonian.kr)
         .collect()
 }
 
@@ -239,20 +239,13 @@ fn time_grid(period: f64, steps_per_period: usize, n_periods: usize) -> Vec<f64>
 }
 
 fn accumulate_projected_trajectory(
-    params: &HamiltonianParams,
-    decay: Decay,
+    params: &DrivenAtomParams,
     t_array: &[f64],
     last_start: usize,
     observable: Vec3,
     projected: &mut [f64],
 ) {
-    let step_at = |t, dt| {
-        Liouvillian {
-            hamiltonian: params.h(t),
-            decay,
-        }
-        .for_duration(dt)
-    };
+    let step_at = |t, dt| params.liouvillian_at(t).for_duration(dt);
     let mut channels = steps(t_array, &step_at);
     let warmed =
         Process::new(channels.by_ref().take(last_start)).propagate_to_final(BlochVec::ground());
@@ -274,12 +267,15 @@ mod tests {
     fn rejects_invalid_modulation_frequency() {
         for mod_freq in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let params = MtsParams {
-                hamiltonian: HamiltonianParams {
-                    modulation: ModulationParams {
-                        frequency: mod_freq,
-                        ..ModulationParams::default()
+                atom: DrivenAtomParams {
+                    hamiltonian: HamiltonianParams {
+                        modulation: ModulationParams {
+                            frequency: mod_freq,
+                            ..ModulationParams::default()
+                        },
+                        ..HamiltonianParams::default()
                     },
-                    ..HamiltonianParams::default()
+                    ..MtsParams::default().atom
                 },
                 ..MtsParams::default()
             };
@@ -299,9 +295,12 @@ mod tests {
     fn default_scan_is_finite_in_every_frame() {
         for frame in [Frame::Pump, Frame::Atom, Frame::Probe] {
             let params = MtsParams {
-                hamiltonian: HamiltonianParams {
-                    frame,
-                    ..HamiltonianParams::default()
+                atom: DrivenAtomParams {
+                    hamiltonian: HamiltonianParams {
+                        frame,
+                        ..HamiltonianParams::default()
+                    },
+                    ..MtsParams::default().atom
                 },
                 ..MtsParams::default()
             };
@@ -418,19 +417,21 @@ mod tests {
                 },
             ] {
                 let params = MtsParams {
-                    hamiltonian: HamiltonianParams {
-                        r_pump: 0.0,
-                        r_prbe: drive,
-                        modulation: ModulationParams {
-                            depth: 0.0,
-                            ..ModulationParams::default()
+                    atom: DrivenAtomParams {
+                        hamiltonian: HamiltonianParams {
+                            r_pump: 0.0,
+                            r_prbe: drive,
+                            modulation: ModulationParams {
+                                depth: 0.0,
+                                ..ModulationParams::default()
+                            },
+                            ..HamiltonianParams::default()
                         },
-                        ..HamiltonianParams::default()
-                    },
-                    decay: Decay {
-                        gamma_up: 0.5,
-                        gamma_down: 0.5,
-                        gamma_phi: 0.5,
+                        decay: Decay {
+                            gamma_up: 0.5,
+                            gamma_down: 0.5,
+                            gamma_phi: 0.5,
+                        },
                     },
                     solver: MtsSolverParams {
                         kr_n: 1,
@@ -482,19 +483,21 @@ mod tests {
         for steps in [16, 32, 64] {
             let output = compute_demod(
                 &MtsParams {
-                    hamiltonian: HamiltonianParams {
-                        r_pump: 0.0,
-                        r_prbe: 1.0,
-                        modulation: ModulationParams {
-                            depth: 0.0,
-                            ..ModulationParams::default()
+                    atom: DrivenAtomParams {
+                        hamiltonian: HamiltonianParams {
+                            r_pump: 0.0,
+                            r_prbe: 1.0,
+                            modulation: ModulationParams {
+                                depth: 0.0,
+                                ..ModulationParams::default()
+                            },
+                            ..HamiltonianParams::default()
                         },
-                        ..HamiltonianParams::default()
-                    },
-                    decay: Decay {
-                        gamma_up: 0.5,
-                        gamma_down: 0.5,
-                        gamma_phi: 0.5,
+                        decay: Decay {
+                            gamma_up: 0.5,
+                            gamma_down: 0.5,
+                            gamma_phi: 0.5,
+                        },
                     },
                     solver: MtsSolverParams {
                         kr_n: 1,

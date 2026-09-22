@@ -20,27 +20,29 @@ pub struct Case {
 /// both sides of the comparison. This adapter is the place to follow API changes.
 pub fn current_params(params: &mts_reference::MtsParams) -> current::MtsParams {
     current::MtsParams {
-        hamiltonian: current::HamiltonianParams {
-            modulation: ModulationParams {
-                frequency: params.mod_freq,
-                depth: params.mod_depth,
-                shift: params.mod_shift,
+        atom: current::DrivenAtomParams {
+            hamiltonian: current::HamiltonianParams {
+                modulation: ModulationParams {
+                    frequency: params.mod_freq,
+                    depth: params.mod_depth,
+                    shift: params.mod_shift,
+                },
+                delta: params.delta,
+                r_pump: params.r_pump,
+                r_prbe: params.r_prbe,
+                kv: params.kv,
+                kr: params.kr,
+                frame: match params.frame {
+                    mts_reference::Frame::Atom => current::Frame::Atom,
+                    mts_reference::Frame::Pump => current::Frame::Pump,
+                    mts_reference::Frame::Probe => current::Frame::Probe,
+                },
             },
-            delta: params.delta,
-            r_pump: params.r_pump,
-            r_prbe: params.r_prbe,
-            kv: params.kv,
-            kr: params.kr,
-            frame: match params.frame {
-                mts_reference::Frame::Atom => current::Frame::Atom,
-                mts_reference::Frame::Pump => current::Frame::Pump,
-                mts_reference::Frame::Probe => current::Frame::Probe,
+            decay: atomic_clocks::twolevel::Decay {
+                gamma_up: params.gamma_up,
+                gamma_down: params.gamma_down,
+                gamma_phi: params.gamma_phi,
             },
-        },
-        decay: atomic_clocks::twolevel::Decay {
-            gamma_up: params.gamma_up,
-            gamma_down: params.gamma_down,
-            gamma_phi: params.gamma_phi,
         },
         solver: current::MtsSolverParams {
             kr_n: params.kr_n,

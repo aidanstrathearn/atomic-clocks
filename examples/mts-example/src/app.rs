@@ -35,7 +35,7 @@ impl Params {
     /// the velocity class selected by the carrier shift.
     pub(super) fn velocity_params(&self) -> VelocityParams {
         VelocityParams {
-            mean: self.mts.hamiltonian.modulation.shift / 2.0,
+            mean: self.mts.atom.hamiltonian.modulation.shift / 2.0,
             ..self.velocity
         }
     }
@@ -43,13 +43,13 @@ impl Params {
     /// Returns the probe-frame Hamiltonian in coordinates centred on the
     /// velocity class selected by the carrier shift.
     pub(super) fn probe_hamiltonian(&self, kv: f64) -> HamiltonianParams {
-        let mut modulation = self.mts.hamiltonian.modulation;
+        let mut modulation = self.mts.atom.hamiltonian.modulation;
         modulation.shift = 0.0;
         HamiltonianParams {
             modulation,
             kv,
             frame: Frame::Probe,
-            ..self.mts.hamiltonian
+            ..self.mts.atom.hamiltonian
         }
     }
 }

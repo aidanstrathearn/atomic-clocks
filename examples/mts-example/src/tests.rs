@@ -3,7 +3,8 @@ use atomic_clocks::maths::demodulation::ModulationParams;
 use atomic_clocks::maths::normalised_gaussian;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams, compute_demod,
+    DrivenAtomParams, Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams,
+    compute_demod,
 };
 
 use crate::app::Params;
@@ -21,7 +22,10 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
 fn demod_at_velocity(params: &Params, kv: f64) -> SignalOutput {
     compute_demod(
         &MtsParams {
-            hamiltonian: params.probe_hamiltonian(kv),
+            atom: DrivenAtomParams {
+                hamiltonian: params.probe_hamiltonian(kv),
+                ..params.mts.atom
+            },
             ..params.mts
         },
         Vec3 {
@@ -45,10 +49,13 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
         for steps_per_period in [128, 256] {
             let params = Params {
                 mts: MtsParams {
-                    hamiltonian: HamiltonianParams {
-                        delta,
-                        kv,
-                        ..Default::default()
+                    atom: DrivenAtomParams {
+                        hamiltonian: HamiltonianParams {
+                            delta,
+                            kv,
+                            ..Default::default()
+                        },
+                        ..MtsParams::default().atom
                     },
                     solver: MtsSolverParams {
                         kr_n: 16,
@@ -117,9 +124,12 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
 fn small_params() -> Params {
     Params {
         mts: MtsParams {
-            hamiltonian: HamiltonianParams {
-                frame: Frame::Pump,
-                ..HamiltonianParams::default()
+            atom: DrivenAtomParams {
+                hamiltonian: HamiltonianParams {
+                    frame: Frame::Pump,
+                    ..HamiltonianParams::default()
+                },
+                ..MtsParams::default().atom
             },
             solver: MtsSolverParams {
                 kr_n: 3,
@@ -271,12 +281,15 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
     let sigma = 2.7;
     let params = Params {
         mts: MtsParams {
-            hamiltonian: HamiltonianParams {
-                modulation: ModulationParams {
-                    shift,
+            atom: DrivenAtomParams {
+                hamiltonian: HamiltonianParams {
+                    modulation: ModulationParams {
+                        shift,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
-                ..Default::default()
+                ..MtsParams::default().atom
             },
             ..Default::default()
         },
@@ -319,28 +332,34 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
             1e-15,
         );
         let finite_shift = MtsParams {
-            hamiltonian: HamiltonianParams {
-                modulation: ModulationParams {
-                    shift,
+            atom: DrivenAtomParams {
+                hamiltonian: HamiltonianParams {
+                    modulation: ModulationParams {
+                        shift,
+                        ..Default::default()
+                    },
+                    delta: relative_delta + shift / 2.0,
+                    kv: physical_kv,
                     ..Default::default()
                 },
-                delta: relative_delta + shift / 2.0,
-                kv: physical_kv,
-                ..Default::default()
+                ..MtsParams::default().atom
             },
             solver,
             scan,
             ..Default::default()
         };
         let zero_shift = MtsParams {
-            hamiltonian: HamiltonianParams {
-                modulation: ModulationParams {
-                    shift: 0.0,
-                    ..finite_shift.hamiltonian.modulation
+            atom: DrivenAtomParams {
+                hamiltonian: HamiltonianParams {
+                    modulation: ModulationParams {
+                        shift: 0.0,
+                        ..finite_shift.atom.hamiltonian.modulation
+                    },
+                    delta: relative_delta,
+                    kv: shifted_kv,
+                    ..finite_shift.atom.hamiltonian
                 },
-                delta: relative_delta,
-                kv: shifted_kv,
-                ..finite_shift.hamiltonian
+                ..finite_shift.atom
             },
             ..finite_shift
         };
@@ -378,10 +397,13 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
     let epsilon = 1e-4;
     let params = Params {
         mts: MtsParams {
-            hamiltonian: HamiltonianParams {
-                delta: 0.4,
-                kv: 0.7,
-                ..Default::default()
+            atom: DrivenAtomParams {
+                hamiltonian: HamiltonianParams {
+                    delta: 0.4,
+                    kv: 0.7,
+                    ..Default::default()
+                },
+                ..MtsParams::default().atom
             },
             solver: MtsSolverParams {
                 kr_n: 8,

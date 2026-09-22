@@ -2,12 +2,9 @@ use std::f64::consts::PI;
 
 use crate::maths::demodulation::{Demodulation, lockin_period};
 use crate::maths::linspace;
-use crate::twolevel::{
-    BlochVec, Decay, Hamiltonian, Liouvillian, Observable, Process, TimeDependentHamiltonian, Vec3,
-    steps,
-};
+use crate::twolevel::{BlochVec, Hamiltonian, Observable, Process, Vec3, steps};
 
-use super::hamiltonian::HamiltonianParams;
+use super::hamiltonian::{DrivenAtomParams, HamiltonianParams};
 
 /// Sampling for the spatially averaged detuning response at one velocity.
 #[derive(Clone, Copy, Debug)]
@@ -120,8 +117,8 @@ impl LinearResponseOutput {
 }
 
 /// Spatially averages the response of `observable · sigma` to a change in `delta`.
-/// Uses exactly `hamiltonian.kv` and `hamiltonian.delta`, with no detuning scan or
-/// velocity averaging. The observable is constant in `hamiltonian.frame` and its
+/// Uses exactly `atom.hamiltonian.kv` and `atom.hamiltonian.delta`, with no detuning
+/// scan or velocity averaging. The observable is constant in the Hamiltonian frame and its
 /// magnitude scales the result. Use `(0, 1, 0)` to match the MTS example.
 ///
 /// The perturbation is `H = H0 + f(t) sigma_z / 2`, with decay held fixed:
@@ -138,19 +135,18 @@ impl LinearResponseOutput {
 /// averaged response be treated as periodic in observation phase. Check warmup,
 /// time resolution, spatial sampling and the delay cutoff for convergence.
 pub fn compute_linear_response(
-    hamiltonian: &HamiltonianParams,
-    decay: Decay,
+    atom: &DrivenAtomParams,
     solver: &LinearResponseSolverParams,
     observable: Vec3,
 ) -> Result<LinearResponseOutput, String> {
-    hamiltonian.validate()?;
+    atom.validate()?;
     if ![observable.x, observable.y, observable.z]
         .iter()
         .all(|value| value.is_finite())
     {
         return Err("Hamiltonian and observable coefficients must be finite".to_string());
     }
-    decay.validate()?;
+    let hamiltonian = &atom.hamiltonian;
     let LinearResponseGrid {
         total_steps,
         warmup_steps,
@@ -171,17 +167,14 @@ pub fn compute_linear_response(
     let perturbation = Observable::from(Hamiltonian::new(0.0, 0.0, 1.0));
 
     for phase in linspace(0.0, 2.0 * PI, solver.kr_n).into_iter().skip(1) {
-        let atom = HamiltonianParams {
-            kr: hamiltonian.kr + phase,
-            ..*hamiltonian
+        let sampled_atom = DrivenAtomParams {
+            hamiltonian: HamiltonianParams {
+                kr: hamiltonian.kr + phase,
+                ..*hamiltonian
+            },
+            ..*atom
         };
-        let step_at = |t, duration| {
-            Liouvillian {
-                hamiltonian: atom.h(t),
-                decay,
-            }
-            .for_duration(duration)
-        };
+        let step_at = |t, duration| sampled_atom.liouvillian_at(t).for_duration(duration);
         let mut channel_steps = steps(&grid, &step_at);
         let warmed = Process::new(channel_steps.by_ref().take(warmup_steps))
             .propagate_to_final(BlochVec::ground());
@@ -215,7 +208,7 @@ mod tests {
     use super::super::{Frame, MtsParams};
     use super::*;
     use crate::maths::demodulation::ModulationParams;
-    use crate::twolevel::Channel;
+    use crate::twolevel::{Channel, Decay, Liouvillian, TimeDependentHamiltonian};
 
     #[test]
     fn response_demodulation_resolves_time_harmonics_at_each_delay() {
@@ -273,9 +266,9 @@ mod tests {
             y: 1.0,
             z: -0.2,
         };
-        let decay = MtsParams::default().decay;
+        let decay = MtsParams::default().atom.decay;
         for frame in [Frame::Probe, Frame::Pump, Frame::Atom] {
-            let atom = HamiltonianParams {
+            let hamiltonian = HamiltonianParams {
                 frame,
                 kv: 0.37,
                 delta: -0.6,
@@ -286,8 +279,9 @@ mod tests {
                 },
                 ..Default::default()
             };
-            let result = compute_linear_response(&atom, decay, &solver, observable).unwrap();
-            let period = atom.modulation.period();
+            let atom = DrivenAtomParams { hamiltonian, decay };
+            let result = compute_linear_response(&atom, &solver, observable).unwrap();
+            let period = hamiltonian.modulation.period();
             let dt = period / solver.steps_per_period as f64;
             assert_eq!(result.times.len(), 9);
             assert_eq!(result.delays.len(), 17);
@@ -308,8 +302,8 @@ mod tests {
                         let mut sum = 0.0;
                         for k in 1..=solver.kr_n {
                             let sample = HamiltonianParams {
-                                kr: atom.kr + 2.0 * PI * k as f64 / solver.kr_n as f64,
-                                ..atom
+                                kr: hamiltonian.kr + 2.0 * PI * k as f64 / solver.kr_n as f64,
+                                ..hamiltonian
                             };
                             let mut state = BlochVec::ground();
                             for boundary in 0..=end {
@@ -351,7 +345,7 @@ mod tests {
 
     #[test]
     fn integrated_response_matches_analytic_static_detuning_slope() {
-        let atom = HamiltonianParams {
+        let hamiltonian = HamiltonianParams {
             r_pump: 0.0,
             r_prbe: 0.8,
             delta: 0.7,
@@ -362,6 +356,7 @@ mod tests {
             gamma_down: 1.0,
             gamma_phi: 0.2,
         };
+        let atom = DrivenAtomParams { hamiltonian, decay };
         let solver = LinearResponseSolverParams {
             kr_n: 2,
             steps_per_period: 128,
@@ -373,13 +368,15 @@ mod tests {
             y: 1.0,
             z: 0.0,
         };
-        let result = compute_linear_response(&atom, decay, &solver, observable).unwrap();
+        let result = compute_linear_response(&atom, &solver, observable).unwrap();
         // For the constant probe drive, r_y = gamma2 * Omega / denominator
         // and the immediate z-kick response is r_x = -Omega * delta / denominator.
-        let denominator =
-            decay.gamma2().powi(2) + atom.delta.powi(2) + decay.gamma2() * atom.r_prbe.powi(2);
-        let expected_kick = -atom.r_prbe * atom.delta / denominator;
-        let expected_slope = -2.0 * decay.gamma2() * atom.r_prbe * atom.delta / denominator.powi(2);
+        let denominator = decay.gamma2().powi(2)
+            + hamiltonian.delta.powi(2)
+            + decay.gamma2() * hamiltonian.r_prbe.powi(2);
+        let expected_kick = -hamiltonian.r_prbe * hamiltonian.delta / denominator;
+        let expected_slope =
+            -2.0 * decay.gamma2() * hamiltonian.r_prbe * hamiltonian.delta / denominator.powi(2);
         let dt = result.delays[1];
         for row in &result.response {
             assert!((row[0] - expected_kick).abs() < 1e-10);
@@ -396,8 +393,7 @@ mod tests {
 
     #[test]
     fn response_accepts_zero_delay_and_rejects_invalid_sampling() {
-        let atom = HamiltonianParams::default();
-        let decay = MtsParams::default().decay;
+        let atom = MtsParams::default().atom;
         let observable = Vec3 {
             x: 0.0,
             y: 1.0,
@@ -409,7 +405,7 @@ mod tests {
             warmup_periods: 0,
             delay_periods: 0,
         };
-        let result = compute_linear_response(&atom, decay, &solver, observable).unwrap();
+        let result = compute_linear_response(&atom, &solver, observable).unwrap();
         assert_eq!(result.delays, [0.0]);
         assert_eq!(result.response.len(), 5);
         assert!(result.response.iter().all(|row| row.len() == 1));
@@ -425,17 +421,20 @@ mod tests {
                 ..solver
             },
         ] {
-            assert!(compute_linear_response(&atom, decay, &invalid, observable).is_err());
+            assert!(compute_linear_response(&atom, &invalid, observable).is_err());
         }
         for frequency in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            let invalid = HamiltonianParams {
-                modulation: ModulationParams {
-                    frequency,
-                    ..atom.modulation
+            let invalid = DrivenAtomParams {
+                hamiltonian: HamiltonianParams {
+                    modulation: ModulationParams {
+                        frequency,
+                        ..atom.hamiltonian.modulation
+                    },
+                    ..atom.hamiltonian
                 },
                 ..atom
             };
-            assert!(compute_linear_response(&invalid, decay, &solver, observable).is_err());
+            assert!(compute_linear_response(&invalid, &solver, observable).is_err());
         }
     }
 }

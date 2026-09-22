@@ -1,9 +1,11 @@
+mod experiment;
 mod hamiltonian;
 mod linear_response;
 mod mts;
 mod velocity;
 
-pub use hamiltonian::{Frame, HamiltonianParams};
+pub use experiment::{Laser, MtsExperiment, Transition, VapourCell};
+pub use hamiltonian::{DrivenAtomParams, Frame, HamiltonianParams};
 pub use linear_response::{
     LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
 };
