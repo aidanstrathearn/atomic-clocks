@@ -4,10 +4,10 @@ mod linear_response;
 mod mts;
 mod velocity;
 
-pub use experiment::{Laser, MtsExperiment, Transition, VapourCell};
+pub use experiment::{Laser, ModelTimeScale, MtsExperiment, Transition, VapourCell};
 pub use hamiltonian::{DrivenAtomParams, Frame, HamiltonianParams};
 pub use linear_response::{
-    LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
+    compute_linear_response, LinearResponseOutput, LinearResponseSolverParams,
 };
-pub use mts::{DemodOutput, MtsParams, MtsSolverParams, compute_demod, compute_demod_harmonics};
+pub use mts::{compute_demod, compute_demod_harmonics, DemodOutput, MtsParams, MtsSolverParams};
 pub use velocity::{VelocityParams, VelocitySample};

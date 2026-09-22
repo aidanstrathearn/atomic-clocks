@@ -1,15 +1,16 @@
+use std::f64::consts::TAU;
+
 use atomic_clocks::common::DetuningScanParams;
 use atomic_clocks::maths::demodulation::ModulationParams;
 use atomic_clocks::maths::normalised_gaussian;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    DrivenAtomParams, Frame, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams,
-    compute_demod,
+    compute_demod, DrivenAtomParams, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams,
 };
 
 use crate::app::Params;
 use crate::gradients::{harmonic_gradients, normalised_adjacent_gradient_sums};
-use crate::probe::{MtsCurves, SIGNAL_HARMONICS, SignalOutput, velocity_average};
+use crate::probe::{velocity_average, MtsCurves, SignalOutput, SIGNAL_HARMONICS};
 use crate::response::{response_at_velocity, response_output};
 
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
@@ -19,14 +20,38 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     );
 }
 
+#[test]
+fn default_experiment_reproduces_the_previous_model_rates() {
+    let params = Params::default();
+    let mts = params.mts_params().unwrap();
+
+    assert_eq!(params.experiment.cell.transition.wavelength_nm, 556.0);
+    assert_eq!(params.experiment.pump.waist_radius_mm, 1.0);
+    assert_eq!(params.experiment.probe.waist_radius_mm, 1.0);
+    assert_close(mts.atom.hamiltonian.r_pump, 1.0, 1e-14);
+    assert_close(mts.atom.hamiltonian.r_prbe, 0.1, 1e-14);
+    assert_close(mts.atom.decay.gamma_down, 1.0, 1e-14);
+    assert_close(
+        params.experiment.pump.power_milliwatts,
+        0.003_802_164_024_35,
+        1e-12,
+    );
+    assert_close(
+        params.experiment.probe.power_milliwatts,
+        0.000_038_021_640_243_5,
+        1e-14,
+    );
+}
+
 fn demod_at_velocity(params: &Params, kv: f64) -> SignalOutput {
+    let mts = params.mts_params().unwrap();
     compute_demod(
         &MtsParams {
             atom: DrivenAtomParams {
-                hamiltonian: params.probe_hamiltonian(kv),
-                ..params.mts.atom
+                hamiltonian: params.probe_hamiltonian(&mts, kv),
+                ..mts.atom
             },
-            ..params.mts
+            ..mts
         },
         Vec3 {
             x: 0.0,
@@ -47,30 +72,16 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
     for (delta, kv) in [(0.6, 0.0), (-0.4, 0.37)] {
         let mut previous_errors = [f64::INFINITY; 4];
         for steps_per_period in [128, 256] {
-            let params = Params {
-                mts: MtsParams {
-                    atom: DrivenAtomParams {
-                        hamiltonian: HamiltonianParams {
-                            delta,
-                            kv,
-                            ..Default::default()
-                        },
-                        ..MtsParams::default().atom
-                    },
-                    solver: MtsSolverParams {
-                        kr_n: 16,
-                        steps_per_period,
-                        n_periods: 13,
-                    },
-                    scan: DetuningScanParams {
-                        hz_lim: epsilon,
-                        hz_num: 3,
-                    },
-                    ..Default::default()
-                },
-                response_delay_periods: 6,
-                ..Params::default()
+            let mut params = Params::default();
+            params.experiment.probe_detuning = delta / TAU;
+            params.experiment.scan_half_range = epsilon / TAU;
+            params.experiment.scan_samples = 3;
+            params.solver = MtsSolverParams {
+                kr_n: 16,
+                steps_per_period,
+                n_periods: 13,
             };
+            params.response_delay_periods = 6;
             let output = response_at_velocity(&params, kv).unwrap();
             let integrate = |harmonic| {
                 output
@@ -122,41 +133,28 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
 }
 
 fn small_params() -> Params {
-    Params {
-        mts: MtsParams {
-            atom: DrivenAtomParams {
-                hamiltonian: HamiltonianParams {
-                    frame: Frame::Pump,
-                    ..HamiltonianParams::default()
-                },
-                ..MtsParams::default().atom
-            },
-            solver: MtsSolverParams {
-                kr_n: 3,
-                steps_per_period: 40,
-                n_periods: 2,
-            },
-            scan: DetuningScanParams {
-                hz_num: 7,
-                ..DetuningScanParams::default()
-            },
-            ..MtsParams::default()
-        },
-        velocity: VelocityParams {
-            sigma: 2.0,
-            half_width: 1.5,
-            sample_count: 3,
-            ..VelocityParams::default()
-        },
-        ..Params::default()
-    }
+    let mut params = Params::default();
+    params.solver = MtsSolverParams {
+        kr_n: 3,
+        steps_per_period: 40,
+        n_periods: 2,
+    };
+    params.experiment.scan_samples = 7;
+    params.velocity = VelocityParams {
+        sigma: 2.0,
+        half_width: 1.5,
+        sample_count: 3,
+        ..VelocityParams::default()
+    };
+    params
 }
 
 #[test]
 fn weighted_signal_matches_serial_signed_coefficients() {
     let params = small_params();
     let average = velocity_average(&params).unwrap();
-    let samples = params.velocity_params().samples().unwrap();
+    let mts = params.mts_params().unwrap();
+    let samples = params.velocity_params(&mts).samples().unwrap();
     let reference: Vec<_> = samples
         .iter()
         .map(|sample| (sample.weight, demod_at_velocity(&params, sample.kv)))
@@ -183,19 +181,11 @@ fn weighted_signal_matches_serial_signed_coefficients() {
 #[test]
 fn harmonic_gradients_match_the_plotted_in_phase_signal_slopes() {
     let epsilon = 1e-4;
-    let params = Params {
-        mts: MtsParams {
-            scan: DetuningScanParams {
-                hz_lim: epsilon,
-                hz_num: 2,
-                ..small_params().mts.scan
-            },
-            ..small_params().mts
-        },
-        gradient_epsilon: epsilon,
-        gradient_harmonics: 3,
-        ..small_params()
-    };
+    let mut params = small_params();
+    params.experiment.scan_half_range = epsilon / TAU;
+    params.experiment.scan_samples = 2;
+    params.gradient_epsilon = epsilon;
+    params.gradient_harmonics = 3;
     let gradients = harmonic_gradients(&params).unwrap();
     let signal = velocity_average(&params).unwrap();
 
@@ -250,7 +240,8 @@ fn weighted_response_matches_serial_kernels() {
         ..small_params()
     };
     let sum = response_output(&params).unwrap();
-    let samples = params.velocity_params().samples().unwrap();
+    let mts = params.mts_params().unwrap();
+    let samples = params.velocity_params(&mts).samples().unwrap();
     let reference: Vec<_> = samples
         .iter()
         .map(|sample| {
@@ -279,35 +270,22 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
     let shift = 1.4;
     let relative_delta = 0.3;
     let sigma = 2.7;
-    let params = Params {
-        mts: MtsParams {
-            atom: DrivenAtomParams {
-                hamiltonian: HamiltonianParams {
-                    modulation: ModulationParams {
-                        shift,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                ..MtsParams::default().atom
-            },
-            ..Default::default()
-        },
-        velocity: VelocityParams {
-            sigma,
-            half_width: 1.5,
-            sample_count: 3,
-            ..VelocityParams::default()
-        },
-        ..Default::default()
+    let mut params = Params::default();
+    params.experiment.pump_probe_offset = shift / TAU;
+    params.velocity = VelocityParams {
+        sigma,
+        half_width: 1.5,
+        sample_count: 3,
+        ..VelocityParams::default()
     };
-    assert_eq!(params.probe_hamiltonian(0.0).modulation.shift, 0.0);
+    let mts = params.mts_params().unwrap();
+    assert_eq!(params.probe_hamiltonian(&mts, 0.0).modulation.shift, 0.0);
     assert_close(
-        crate::probe::display_detuning(&params.mts, relative_delta),
+        crate::probe::display_detuning(&mts, relative_delta),
         relative_delta + shift / 2.0,
         1e-15,
     );
-    for sample in params.velocity_params().samples().unwrap() {
+    for sample in params.velocity_params(&mts).samples().unwrap() {
         assert_close(
             sample.weight,
             normalised_gaussian(sample.kv, shift / 2.0, sigma),
@@ -395,36 +373,22 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
 #[test]
 fn integrated_weighted_response_matches_weighted_signal_slope() {
     let epsilon = 1e-4;
-    let params = Params {
-        mts: MtsParams {
-            atom: DrivenAtomParams {
-                hamiltonian: HamiltonianParams {
-                    delta: 0.4,
-                    kv: 0.7,
-                    ..Default::default()
-                },
-                ..MtsParams::default().atom
-            },
-            solver: MtsSolverParams {
-                kr_n: 8,
-                steps_per_period: 128,
-                n_periods: 13,
-            },
-            scan: DetuningScanParams {
-                hz_lim: epsilon,
-                hz_num: 3,
-            },
-            ..Default::default()
-        },
-        velocity: VelocityParams {
-            sigma: 2.0,
-            half_width: 1.5,
-            sample_count: 5,
-            ..VelocityParams::default()
-        },
-        response_delay_periods: 6,
-        ..Params::default()
+    let mut params = Params::default();
+    params.experiment.probe_detuning = 0.4 / TAU;
+    params.experiment.scan_half_range = epsilon / TAU;
+    params.experiment.scan_samples = 3;
+    params.solver = MtsSolverParams {
+        kr_n: 8,
+        steps_per_period: 128,
+        n_periods: 13,
     };
+    params.velocity = VelocityParams {
+        sigma: 2.0,
+        half_width: 1.5,
+        sample_count: 5,
+        ..VelocityParams::default()
+    };
+    params.response_delay_periods = 6;
     let response = response_output(&params).unwrap();
     let integral = response
         .demodulate(1)
@@ -444,12 +408,10 @@ fn default_velocity_scan_is_finite() {
     let params = Params::default();
     let average = velocity_average(&params).unwrap();
     assert_eq!(average.harmonics, SIGNAL_HARMONICS);
-    assert_eq!(average.values.len(), params.mts.scan.hz_num);
-    assert!(
-        average
-            .values
-            .iter()
-            .flatten()
-            .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite())
-    );
+    assert_eq!(average.values.len(), params.experiment.scan_samples);
+    assert!(average
+        .values
+        .iter()
+        .flatten()
+        .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite()));
 }

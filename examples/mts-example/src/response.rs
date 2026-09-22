@@ -3,12 +3,12 @@ use std::f64::consts::PI;
 use atomic_clocks::maths::fourier_transform;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    DrivenAtomParams, LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
+    compute_linear_response, DrivenAtomParams, LinearResponseOutput, LinearResponseSolverParams,
 };
 use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
-use crate::app::{Params, common_control_groups};
+use crate::app::{common_control_groups, Params};
 use crate::units::to_mhz;
 
 const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
@@ -22,7 +22,7 @@ pub(super) fn demodulated_controls(params: &mut Params) -> SliderGrid<'_> {
 }
 
 fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
-    let time_step = 1.0 / params.mts.solver.steps_per_period as f64;
+    let time_step = 1.0 / params.solver.steps_per_period as f64;
     let time_slider = show_time.then(|| {
         Slider::new(
             "Observation time (t / T)",
@@ -39,34 +39,47 @@ fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
             1..=20,
         )]),
     );
+    let experiment = &mut params.experiment;
     let common = common_control_groups(
-        &mut params.mts.atom.hamiltonian,
-        &mut params.mts.atom.decay,
-        &mut params.mts.solver.kr_n,
-        &mut params.mts.solver.steps_per_period,
-        &mut params.mts.solver.n_periods,
+        &mut experiment.pump,
+        &mut experiment.probe,
+        &mut experiment.cell.transition,
+        &mut experiment.probe_detuning,
+        &mut experiment.modulation_frequency,
+        &mut experiment.modulation_depth,
+        &mut experiment.pump_probe_offset,
+        &mut experiment.pure_dephasing_rate,
+        &mut params.solver,
         &mut params.velocity,
     );
-    SliderGrid::new(5, common.into_iter().chain([response]))
+    SliderGrid::new(6, common.into_iter().chain([response]))
 }
 
 pub(super) fn response_at_velocity(
     params: &Params,
     kv: f64,
 ) -> Result<LinearResponseOutput, String> {
-    let warmup_periods = params
-        .mts
+    let mts = params.mts_params()?;
+    response_at_velocity_for_model(params, &mts, kv)
+}
+
+fn response_at_velocity_for_model(
+    params: &Params,
+    mts: &atomic_clocks::vapourcell::MtsParams,
+    kv: f64,
+) -> Result<LinearResponseOutput, String> {
+    let warmup_periods = mts
         .solver
         .n_periods
         .checked_sub(1)
         .ok_or("MTS period count must be positive")?;
     let atom = DrivenAtomParams {
-        hamiltonian: params.probe_hamiltonian(kv),
-        ..params.mts.atom
+        hamiltonian: params.probe_hamiltonian(mts, kv),
+        ..mts.atom
     };
     let solver = LinearResponseSolverParams {
-        kr_n: params.mts.solver.kr_n,
-        steps_per_period: params.mts.solver.steps_per_period,
+        kr_n: mts.solver.kr_n,
+        steps_per_period: mts.solver.steps_per_period,
         warmup_periods,
         delay_periods: params.response_delay_periods,
     };
@@ -104,7 +117,15 @@ fn add_response(
 }
 
 pub(super) fn response_output(params: &Params) -> Result<LinearResponseOutput, String> {
-    let samples = params.velocity_params().samples()?;
+    let mts = params.mts_params()?;
+    response_output_for_model(params, &mts)
+}
+
+fn response_output_for_model(
+    params: &Params,
+    mts: &atomic_clocks::vapourcell::MtsParams,
+) -> Result<LinearResponseOutput, String> {
+    let samples = params.velocity_params(mts).samples()?;
 
     // Bound retained matrices by the worker count, and retain a fixed sample/chunk
     // order so floating-point sums do not depend on scheduling.
@@ -115,7 +136,7 @@ pub(super) fn response_output(params: &Params) -> Result<LinearResponseOutput, S
         .map(|chunk| {
             let mut chunk = chunk.iter().copied();
             let first = chunk.next().expect("velocity chunks are non-empty");
-            let mut sum = response_at_velocity(params, first.kv)?;
+            let mut sum = response_at_velocity_for_model(params, mts, first.kv)?;
             for row in &mut sum.response {
                 for value in row {
                     *value *= first.weight;
@@ -124,7 +145,7 @@ pub(super) fn response_output(params: &Params) -> Result<LinearResponseOutput, S
             for sample in chunk {
                 add_response(
                     &mut sum,
-                    response_at_velocity(params, sample.kv)?,
+                    response_at_velocity_for_model(params, mts, sample.kv)?,
                     sample.weight,
                 )?;
             }
@@ -143,13 +164,13 @@ pub(super) fn response_output(params: &Params) -> Result<LinearResponseOutput, S
 }
 
 pub(super) fn plot(params: &mut Params) -> AppResult {
-    let output = response_output(params)?;
+    let mts = params.mts_params()?;
+    let output = response_output_for_model(params, &mts)?;
     // Select the nearest computed observation time, retaining t = T as a
     // distinct endpoint. Keep the slider aligned when resolution changes.
-    let index = (params.response_time_fraction.clamp(0.0, 1.0)
-        * params.mts.solver.steps_per_period as f64)
+    let index = (params.response_time_fraction.clamp(0.0, 1.0) * mts.solver.steps_per_period as f64)
         .round() as usize;
-    params.response_time_fraction = index as f64 / params.mts.solver.steps_per_period as f64;
+    params.response_time_fraction = index as f64 / mts.solver.steps_per_period as f64;
 
     let mut plot = Plotter::new();
     plot.plot(&output.delays, &output.response[index])
@@ -158,13 +179,14 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     plot.ylabel("C(t, t - τ): σy response to σz / 2");
     plot.xlim(
         0.0,
-        params.response_delay_periods as f64 * params.mts.atom.hamiltonian.modulation.period(),
+        params.response_delay_periods as f64 * mts.atom.hamiltonian.modulation.period(),
     );
     Ok(plot)
 }
 
 pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
-    let output = response_output(params)?;
+    let mts = params.mts_params()?;
+    let output = response_output_for_model(params, &mts)?;
     let dc: Vec<_> = output
         .demodulate(0)
         .iter()
@@ -198,15 +220,16 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
     plot.ylabel("Demodulated σy response to σz / 2");
     plot.xlim(
         0.0,
-        params.response_delay_periods as f64 * params.mts.atom.hamiltonian.modulation.period(),
+        params.response_delay_periods as f64 * mts.atom.hamiltonian.modulation.period(),
     );
     Ok(plot)
 }
 
 pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
-    let output = response_output(params)?;
-    let atom = &params.mts.atom.hamiltonian;
-    let step = atom.modulation.period() / params.mts.solver.steps_per_period as f64;
+    let mts = params.mts_params()?;
+    let output = response_output_for_model(params, &mts)?;
+    let atom = &mts.atom.hamiltonian;
+    let step = atom.modulation.period() / mts.solver.steps_per_period as f64;
     let mut plot = Plotter::new();
     for (harmonic, label) in [
         (0, "DC (twice signed mean)"),

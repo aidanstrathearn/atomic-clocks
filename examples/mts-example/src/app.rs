@@ -1,15 +1,16 @@
-use atomic_clocks::maths::demodulation::ModulationParams;
-use atomic_clocks::twolevel::Decay;
+use std::f64::consts::TAU;
+
 use atomic_clocks::vapourcell::{
-    Frame, HamiltonianParams, LinearResponseSolverParams, MtsParams, VelocityParams,
+    Frame, HamiltonianParams, Laser, LinearResponseSolverParams, ModelTimeScale, MtsExperiment,
+    MtsParams, MtsSolverParams, Transition, VapourCell, VelocityParams,
 };
 use myplotlib::{AppDefinition, Slider, SliderGroup, ViewOption};
 
-use crate::units::frequency_slider;
 use crate::{gradients, probe, response, velocity};
 
 pub(crate) struct Params {
-    pub(super) mts: MtsParams,
+    pub(super) experiment: MtsExperiment,
+    pub(super) solver: MtsSolverParams,
     pub(super) velocity: VelocityParams,
     pub(super) gradient_epsilon: f64,
     pub(super) gradient_harmonics: usize,
@@ -19,8 +20,51 @@ pub(crate) struct Params {
 
 impl Default for Params {
     fn default() -> Self {
+        let time_scale = ModelTimeScale::MICROSECONDS;
+        let transition = Transition {
+            wavelength_nm: 556.0,
+            // Reproduces the previous gamma_down = 1 rad / microsecond.
+            linewidth_hz: 1.0 / (TAU * time_scale.seconds_per_unit()),
+        };
+        let laser_for_rabi = |rabi_per_model_time: f64| {
+            let mut laser = Laser {
+                power_milliwatts: 1.0,
+                waist_radius_mm: 1.0,
+                wavelength_nm: transition.wavelength_nm,
+            };
+            let rabi_at_one_milliwatt =
+                time_scale.angular_rate(transition.rabi_freq_radians_per_s(&laser));
+            laser.power_milliwatts = (rabi_per_model_time / rabi_at_one_milliwatt).powi(2);
+            laser
+        };
+
         Self {
-            mts: MtsParams::default(),
+            experiment: MtsExperiment {
+                time_scale,
+                cell: VapourCell {
+                    transition,
+                    density_per_m3: 0.0,
+                    length_m: 0.1,
+                },
+                pump:  Laser {
+                    power_milliwatts: 0.005,
+                    waist_radius_mm: 1.0,
+                    wavelength_nm: transition.wavelength_nm,
+                },
+                probe: Laser {
+                    power_milliwatts: 0.002,
+                    waist_radius_mm: 1.0,
+                    wavelength_nm: transition.wavelength_nm,
+                },
+                probe_detuning: 0.0,
+                modulation_frequency: 1.0 / TAU,
+                modulation_depth: 1.0 / TAU,
+                pump_probe_offset: 0.0,
+                pure_dephasing_rate: 0.0,
+                scan_half_range: 5.0 / TAU,
+                scan_samples: 50,
+            },
+            solver: MtsSolverParams::default(),
             velocity: VelocityParams::default(),
             gradient_epsilon: 1e-3,
             gradient_harmonics: 10,
@@ -31,78 +75,148 @@ impl Default for Params {
 }
 
 impl Params {
+    pub(super) fn mts_params(&self) -> Result<MtsParams, String> {
+        self.experiment.to_mts_params(self.solver)
+    }
+
     /// Returns the physical velocity distribution in coordinates centred on
     /// the velocity class selected by the carrier shift.
-    pub(super) fn velocity_params(&self) -> VelocityParams {
+    pub(super) fn velocity_params(&self, mts: &MtsParams) -> VelocityParams {
         VelocityParams {
-            mean: self.mts.atom.hamiltonian.modulation.shift / 2.0,
+            mean: mts.atom.hamiltonian.modulation.shift / 2.0,
             ..self.velocity
         }
     }
 
     /// Returns the probe-frame Hamiltonian in coordinates centred on the
     /// velocity class selected by the carrier shift.
-    pub(super) fn probe_hamiltonian(&self, kv: f64) -> HamiltonianParams {
-        let mut modulation = self.mts.atom.hamiltonian.modulation;
+    pub(super) fn probe_hamiltonian(&self, mts: &MtsParams, kv: f64) -> HamiltonianParams {
+        let mut modulation = mts.atom.hamiltonian.modulation;
         modulation.shift = 0.0;
         HamiltonianParams {
             modulation,
             kv,
             frame: Frame::Probe,
-            ..self.mts.atom.hamiltonian
+            ..mts.atom.hamiltonian
         }
     }
 }
 
 fn atom_control_groups<'a>(
-    modulation: &'a mut ModulationParams,
-    r_pump: &'a mut f64,
-    r_prbe: &'a mut f64,
-    gamma_down: &'a mut f64,
-    gamma_phi: &'a mut f64,
-) -> [SliderGroup<'a>; 2] {
+    pump: &'a mut Laser,
+    probe: &'a mut Laser,
+    transition: &'a mut Transition,
+    modulation_frequency: &'a mut f64,
+    modulation_depth: &'a mut f64,
+    pump_probe_offset: &'a mut f64,
+    pure_dephasing_rate: &'a mut f64,
+) -> [SliderGroup<'a>; 3] {
+    let pump_power = &mut pump.power_milliwatts;
+    let probe_power = &mut probe.power_milliwatts;
+    let pump_waist = &mut pump.waist_radius_mm;
+    let probe_waist = &mut probe.waist_radius_mm;
+    let transition_wavelength = &mut transition.wavelength_nm;
+    let pump_wavelength = &mut pump.wavelength_nm;
+    let probe_wavelength = &mut probe.wavelength_nm;
+    let transition_linewidth = &mut transition.linewidth_hz;
+
+    let common_waist = Slider::from_get_set("Beam waist radius (mm)", 0.1..=5.0, move |waist| {
+        if let Some(waist) = waist {
+            *pump_waist = waist;
+            *probe_waist = waist;
+        }
+        *pump_waist
+    })
+    .logarithmic(true);
+    let common_wavelength = Slider::from_get_set(
+        "Transition wavelength (nm)",
+        400.0..=900.0,
+        move |wavelength| {
+            if let Some(wavelength) = wavelength {
+                *transition_wavelength = wavelength;
+                *pump_wavelength = wavelength;
+                *probe_wavelength = wavelength;
+            }
+            *transition_wavelength
+        },
+    );
+    let linewidth = Slider::from_get_set(
+        "Natural linewidth (MHz)",
+        1e-3..=10.0,
+        move |linewidth_mhz| {
+            if let Some(linewidth_mhz) = linewidth_mhz {
+                *transition_linewidth = linewidth_mhz * 1e6;
+            }
+            *transition_linewidth / 1e6
+        },
+    )
+    .logarithmic(true);
+
     [
         SliderGroup::new(
             "Modulation",
             [
-                frequency_slider("Frequency", &mut modulation.frequency, 0.1..=20.0),
-                frequency_slider("Depth", &mut modulation.depth, 0.0..=20.0),
-                frequency_slider("Shift", &mut modulation.shift, -40.0..=40.0),
+                Slider::new(
+                    "Frequency (MHz)",
+                    modulation_frequency,
+                    0.1 / TAU..=20.0 / TAU,
+                ),
+                Slider::new("Depth (MHz)", modulation_depth, 0.0..=20.0 / TAU),
+                Slider::new("Shift (MHz)", pump_probe_offset, -40.0 / TAU..=40.0 / TAU),
             ],
         ),
         SliderGroup::new(
-            "Rates",
+            "Lasers",
             [
-                frequency_slider("Pump Rabi", r_pump, 0.0..=20.0),
-                frequency_slider("Probe Rabi", r_prbe, 0.0..=20.0),
-                frequency_slider("Decay", gamma_down, 0.01..=10.0).logarithmic(true),
-                frequency_slider("Dephasing", gamma_phi, 0.0..=10.0),
+                Slider::new("Pump power (mW)", pump_power, 1e-6..=2.0).logarithmic(true),
+                Slider::new("Probe power (mW)", probe_power, 1e-6..=2.0).logarithmic(true),
+                common_waist,
+            ],
+        ),
+        SliderGroup::new(
+            "Transition",
+            [
+                common_wavelength,
+                linewidth,
+                Slider::new(
+                    "Pure dephasing (MHz)",
+                    pure_dephasing_rate,
+                    0.0..=10.0 / TAU,
+                ),
             ],
         ),
     ]
 }
 
 pub(super) fn common_control_groups<'a>(
-    hamiltonian: &'a mut HamiltonianParams,
-    decay: &'a mut Decay,
-    kr_n: &'a mut usize,
-    steps_per_period: &'a mut usize,
-    n_periods: &'a mut usize,
+    pump: &'a mut Laser,
+    probe: &'a mut Laser,
+    transition: &'a mut Transition,
+    probe_detuning: &'a mut f64,
+    modulation_frequency: &'a mut f64,
+    modulation_depth: &'a mut f64,
+    pump_probe_offset: &'a mut f64,
+    pure_dephasing_rate: &'a mut f64,
+    solver_params: &'a mut MtsSolverParams,
     velocity_params: &'a mut VelocityParams,
-) -> [SliderGroup<'a>; 4] {
-    hamiltonian.delta = 0.0;
-    hamiltonian.kv = 0.0;
-    hamiltonian.kr = 0.0;
-    decay.gamma_up = 0.0;
+) -> [SliderGroup<'a>; 5] {
+    *probe_detuning = 0.0;
 
-    let [modulation, rates] = atom_control_groups(
-        &mut hamiltonian.modulation,
-        &mut hamiltonian.r_pump,
-        &mut hamiltonian.r_prbe,
-        &mut decay.gamma_down,
-        &mut decay.gamma_phi,
+    let [modulation, lasers, transition_controls] = atom_control_groups(
+        pump,
+        probe,
+        transition,
+        modulation_frequency,
+        modulation_depth,
+        pump_probe_offset,
+        pure_dephasing_rate,
     );
     let velocity = velocity::control_group(velocity_params);
+    let MtsSolverParams {
+        kr_n,
+        steps_per_period,
+        n_periods,
+    } = solver_params;
     let solver = SliderGroup::new(
         "Solver",
         [
@@ -118,7 +232,7 @@ pub(super) fn common_control_groups<'a>(
         ],
     );
 
-    [modulation, rates, velocity, solver]
+    [modulation, lasers, transition_controls, velocity, solver]
 }
 
 pub(crate) fn definition() -> AppDefinition<Params> {

@@ -12,6 +12,39 @@ const SPEED_OF_LIGHT: f64 = 299_792_458.0;
 /// Planck constant, in joule-seconds (exact SI value).
 const PLANCK_CONSTANT: f64 = 6.626_070_15e-34;
 
+/// Physical duration represented by one model time unit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModelTimeScale {
+    seconds_per_unit: f64,
+}
+
+impl ModelTimeScale {
+    pub const SECONDS: Self = Self::new(1.0);
+    pub const MILLISECONDS: Self = Self::new(1e-3);
+    pub const MICROSECONDS: Self = Self::new(1e-6);
+    pub const NANOSECONDS: Self = Self::new(1e-9);
+
+    pub const fn new(seconds_per_unit: f64) -> Self {
+        Self { seconds_per_unit }
+    }
+
+    pub const fn seconds_per_unit(self) -> f64 {
+        self.seconds_per_unit
+    }
+
+    /// Converts an angular rate in radians per second to radians per model time unit.
+    pub fn angular_rate(self, radians_per_second: f64) -> f64 {
+        radians_per_second * self.seconds_per_unit
+    }
+
+    pub fn validate(self) -> Result<(), String> {
+        if !self.seconds_per_unit.is_finite() || self.seconds_per_unit <= 0.0 {
+            return Err("model time scale must be positive and finite".to_string());
+        }
+        Ok(())
+    }
+}
+
 /// Saturation intensity in watts per square metre for a closed two-level transition.
 /// `angular_linewidth_per_s` is the population-decay linewidth Γ in radians per second.
 fn saturation_intensity(angular_linewidth_per_s: f64, wavelength_m: f64) -> f64 {
@@ -107,48 +140,52 @@ impl VapourCell {
     }
 }
 
-/// Experiment-facing MTS parameters expressed in SI-derived laboratory units.
+/// Experiment-facing MTS parameters.
 ///
-/// Frequencies are supplied in hertz and converted to angular rates per second.
-/// The laser wavelengths are not used to infer detunings.
+/// Explicit control frequencies are in cycles per model time unit and are
+/// converted to angular rates internally. Rates derived from physical atomic
+/// and laser properties are rescaled from seconds using [`ModelTimeScale`].
+/// Laser wavelengths are not used to infer detunings.
 #[derive(Clone, Copy, Debug)]
 pub struct MtsExperiment {
+    pub time_scale: ModelTimeScale,
     pub cell: VapourCell,
     pub pump: Laser,
     pub probe: Laser,
     /// Probe detuning using the same sign convention as [`HamiltonianParams::delta`].
-    pub probe_detuning_hz: f64,
-    pub modulation_frequency_hz: f64,
-    pub modulation_depth_hz: f64,
+    pub probe_detuning: f64,
+    pub modulation_frequency: f64,
+    pub modulation_depth: f64,
     /// Pump carrier offset from the probe carrier.
-    pub pump_probe_offset_hz: f64,
-    /// The pure-dephasing rate `gamma_phi / (2 pi)`.
-    pub pure_dephasing_rate_hz: f64,
-    pub scan_half_range_hz: f64,
+    pub pump_probe_offset: f64,
+    /// The pure-dephasing rate `gamma_phi / (2 pi)` per model time unit.
+    pub pure_dephasing_rate: f64,
+    pub scan_half_range: f64,
     pub scan_samples: usize,
 }
 
 impl MtsExperiment {
     pub fn validate(&self) -> Result<(), String> {
+        self.time_scale.validate()?;
         self.cell.validate()?;
         self.pump.validate_as("pump laser")?;
         self.probe.validate_as("probe laser")?;
-        if !self.probe_detuning_hz.is_finite() {
+        if !self.probe_detuning.is_finite() {
             return Err("probe detuning must be finite".to_string());
         }
-        if !self.modulation_frequency_hz.is_finite() || self.modulation_frequency_hz <= 0.0 {
+        if !self.modulation_frequency.is_finite() || self.modulation_frequency <= 0.0 {
             return Err("modulation frequency must be positive and finite".to_string());
         }
-        if !self.modulation_depth_hz.is_finite() || self.modulation_depth_hz < 0.0 {
+        if !self.modulation_depth.is_finite() || self.modulation_depth < 0.0 {
             return Err("modulation depth must be finite and nonnegative".to_string());
         }
-        if !self.pump_probe_offset_hz.is_finite() {
+        if !self.pump_probe_offset.is_finite() {
             return Err("pump-probe offset must be finite".to_string());
         }
-        if !self.pure_dephasing_rate_hz.is_finite() || self.pure_dephasing_rate_hz < 0.0 {
+        if !self.pure_dephasing_rate.is_finite() || self.pure_dephasing_rate < 0.0 {
             return Err("pure-dephasing rate must be finite and nonnegative".to_string());
         }
-        if !self.scan_half_range_hz.is_finite() || self.scan_half_range_hz < 0.0 {
+        if !self.scan_half_range.is_finite() || self.scan_half_range < 0.0 {
             return Err("scan half-range must be finite and nonnegative".to_string());
         }
         if self.scan_samples == 0 {
@@ -157,11 +194,11 @@ impl MtsExperiment {
         Ok(())
     }
 
-    /// Converts laboratory inputs to the solver's angular-rate representation.
+    /// Converts laboratory inputs to angular rates per model time unit.
     ///
-    /// The resulting model uses seconds as its time unit and starts in the probe
-    /// frame with zero Doppler shift and spatial phase. Those sampling coordinates
-    /// may be varied directly on the returned low-level parameters.
+    /// The model starts in the probe frame with zero Doppler shift and spatial
+    /// phase. Those sampling coordinates may be varied directly on the returned
+    /// low-level parameters.
     pub fn to_mts_params(&self, solver: MtsSolverParams) -> Result<MtsParams, String> {
         self.validate()?;
         let transition = self.cell.transition;
@@ -169,26 +206,30 @@ impl MtsExperiment {
             atom: DrivenAtomParams {
                 hamiltonian: HamiltonianParams {
                     modulation: ModulationParams {
-                        frequency: TAU * self.modulation_frequency_hz,
-                        depth: TAU * self.modulation_depth_hz,
-                        shift: TAU * self.pump_probe_offset_hz,
+                        frequency: TAU * self.modulation_frequency,
+                        depth: TAU * self.modulation_depth,
+                        shift: TAU * self.pump_probe_offset,
                     },
-                    delta: TAU * self.probe_detuning_hz,
-                    r_pump: transition.rabi_freq_radians_per_s(&self.pump),
-                    r_prbe: transition.rabi_freq_radians_per_s(&self.probe),
+                    delta: TAU * self.probe_detuning,
+                    r_pump: self
+                        .time_scale
+                        .angular_rate(transition.rabi_freq_radians_per_s(&self.pump)),
+                    r_prbe: self
+                        .time_scale
+                        .angular_rate(transition.rabi_freq_radians_per_s(&self.probe)),
                     kv: 0.0,
                     kr: 0.0,
                     frame: Frame::Probe,
                 },
                 decay: Decay {
                     gamma_up: 0.0,
-                    gamma_down: TAU * transition.linewidth_hz,
-                    gamma_phi: TAU * self.pure_dephasing_rate_hz,
+                    gamma_down: self.time_scale.angular_rate(TAU * transition.linewidth_hz),
+                    gamma_phi: TAU * self.pure_dephasing_rate,
                 },
             },
             solver,
             scan: DetuningScanParams {
-                hz_lim: TAU * self.scan_half_range_hz,
+                hz_lim: TAU * self.scan_half_range,
                 hz_num: self.scan_samples,
             },
         };
@@ -203,6 +244,7 @@ mod tests {
 
     fn experiment() -> MtsExperiment {
         MtsExperiment {
+            time_scale: ModelTimeScale::MICROSECONDS,
             cell: VapourCell {
                 transition: Transition {
                     wavelength_nm: 780.24,
@@ -221,18 +263,18 @@ mod tests {
                 waist_radius_mm: 0.6,
                 wavelength_nm: 780.23,
             },
-            probe_detuning_hz: -1.2e6,
-            modulation_frequency_hz: 3.4e6,
-            modulation_depth_hz: 5.6e6,
-            pump_probe_offset_hz: 0.7e6,
-            pure_dephasing_rate_hz: 0.15e6,
-            scan_half_range_hz: 20.0e6,
+            probe_detuning: -1.2,
+            modulation_frequency: 3.4,
+            modulation_depth: 5.6,
+            pump_probe_offset: 0.7,
+            pure_dephasing_rate: 0.15,
+            scan_half_range: 20.0,
             scan_samples: 81,
         }
     }
 
     #[test]
-    fn experiment_converts_to_si_angular_rates() {
+    fn experiment_converts_to_model_angular_rates() {
         let experiment = experiment();
         let solver = MtsSolverParams {
             kr_n: 7,
@@ -245,43 +287,49 @@ mod tests {
         assert_eq!(hamiltonian.frame, Frame::Probe);
         assert_eq!(hamiltonian.kv, 0.0);
         assert_eq!(hamiltonian.kr, 0.0);
-        assert_eq!(hamiltonian.delta, TAU * experiment.probe_detuning_hz);
+        assert_eq!(hamiltonian.delta, TAU * experiment.probe_detuning);
         assert_eq!(
             hamiltonian.modulation.frequency,
-            TAU * experiment.modulation_frequency_hz
+            TAU * experiment.modulation_frequency
         );
         assert_eq!(
             hamiltonian.modulation.depth,
-            TAU * experiment.modulation_depth_hz
+            TAU * experiment.modulation_depth
         );
         assert_eq!(
             hamiltonian.modulation.shift,
-            TAU * experiment.pump_probe_offset_hz
+            TAU * experiment.pump_probe_offset
         );
         assert_eq!(
             hamiltonian.r_pump,
-            experiment
-                .cell
-                .transition
-                .rabi_freq_radians_per_s(&experiment.pump)
+            experiment.time_scale.angular_rate(
+                experiment
+                    .cell
+                    .transition
+                    .rabi_freq_radians_per_s(&experiment.pump)
+            )
         );
         assert_eq!(
             hamiltonian.r_prbe,
-            experiment
-                .cell
-                .transition
-                .rabi_freq_radians_per_s(&experiment.probe)
+            experiment.time_scale.angular_rate(
+                experiment
+                    .cell
+                    .transition
+                    .rabi_freq_radians_per_s(&experiment.probe)
+            )
         );
         assert_eq!(params.atom.decay.gamma_up, 0.0);
         assert_eq!(
             params.atom.decay.gamma_down,
-            TAU * experiment.cell.transition.linewidth_hz
+            experiment
+                .time_scale
+                .angular_rate(TAU * experiment.cell.transition.linewidth_hz)
         );
         assert_eq!(
             params.atom.decay.gamma_phi,
-            TAU * experiment.pure_dephasing_rate_hz
+            TAU * experiment.pure_dephasing_rate
         );
-        assert_eq!(params.scan.hz_lim, TAU * experiment.scan_half_range_hz);
+        assert_eq!(params.scan.hz_lim, TAU * experiment.scan_half_range);
         assert_eq!(params.scan.hz_num, experiment.scan_samples);
         assert_eq!(params.solver.kr_n, solver.kr_n);
         assert_eq!(params.solver.steps_per_period, solver.steps_per_period);

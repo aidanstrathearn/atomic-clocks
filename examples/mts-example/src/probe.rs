@@ -1,14 +1,14 @@
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::{FRAC_PI_2, TAU};
 
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    DemodOutput, DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod,
+    compute_demod, DemodOutput, DrivenAtomParams, HamiltonianParams, MtsParams,
 };
 use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
-use crate::app::{Params, common_control_groups};
-use crate::units::{frequency_slider, to_mhz};
+use crate::app::{common_control_groups, Params};
+use crate::units::to_mhz;
 
 pub(super) const SIGNAL_HARMONICS: [usize; 4] = [0, 1, 2, 3];
 pub(super) type SignalOutput = DemodOutput<{ SIGNAL_HARMONICS.len() }>;
@@ -50,12 +50,16 @@ impl From<SignalOutput> for MtsCurves {
     }
 }
 
-fn scan_control_group<'a>(hz_lim: &'a mut f64, hz_num: &'a mut usize) -> SliderGroup<'a> {
+fn scan_control_group<'a>(half_range: &'a mut f64, sample_count: &'a mut usize) -> SliderGroup<'a> {
     SliderGroup::new(
         "Scan",
         [
-            frequency_slider("Detuning half-range", hz_lim, 0.1..=65.0),
-            Slider::new("Detuning samples", hz_num, 2..=200),
+            Slider::new(
+                "Detuning half-range (MHz)",
+                half_range,
+                0.1 / TAU..=65.0 / TAU,
+            ),
+            Slider::new("Detuning samples", sample_count, 2..=200),
         ],
     )
 }
@@ -89,16 +93,24 @@ pub(super) fn display_detuning(params: &MtsParams, detuning: f64) -> f64 {
 }
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
-    let scan = scan_control_group(&mut params.mts.scan.hz_lim, &mut params.mts.scan.hz_num);
+    let experiment = &mut params.experiment;
+    let scan = scan_control_group(
+        &mut experiment.scan_half_range,
+        &mut experiment.scan_samples,
+    );
     let common = common_control_groups(
-        &mut params.mts.atom.hamiltonian,
-        &mut params.mts.atom.decay,
-        &mut params.mts.solver.kr_n,
-        &mut params.mts.solver.steps_per_period,
-        &mut params.mts.solver.n_periods,
+        &mut experiment.pump,
+        &mut experiment.probe,
+        &mut experiment.cell.transition,
+        &mut experiment.probe_detuning,
+        &mut experiment.modulation_frequency,
+        &mut experiment.modulation_depth,
+        &mut experiment.pump_probe_offset,
+        &mut experiment.pure_dephasing_rate,
+        &mut params.solver,
         &mut params.velocity,
     );
-    SliderGrid::new(5, common.into_iter().chain([scan]))
+    SliderGrid::new(6, common.into_iter().chain([scan]))
 }
 
 fn scale_demod_output<const N: usize>(output: &mut DemodOutput<N>, weight: f64) {
@@ -131,13 +143,18 @@ fn add_demod_output<const N: usize>(
 }
 
 pub(super) fn velocity_average(params: &Params) -> Result<SignalOutput, String> {
-    let samples = params.velocity_params().samples()?;
+    let mts = params.mts_params()?;
+    velocity_average_for_model(params, &mts)
+}
+
+fn velocity_average_for_model(params: &Params, mts: &MtsParams) -> Result<SignalOutput, String> {
+    let samples = params.velocity_params(mts).samples()?;
     let probe = MtsParams {
         atom: DrivenAtomParams {
-            hamiltonian: params.probe_hamiltonian(0.0),
-            ..params.mts.atom
+            hamiltonian: params.probe_hamiltonian(mts, 0.0),
+            ..mts.atom
         },
-        ..params.mts
+        ..*mts
     };
 
     // Collect in sample order so summation is independent of Rayon scheduling.
@@ -172,6 +189,7 @@ pub(super) fn velocity_average(params: &Params) -> Result<SignalOutput, String> 
 }
 
 pub(super) fn plot(params: &mut Params) -> AppResult {
-    let output = MtsCurves::from(velocity_average(params)?);
-    Ok(signal_plot(&params.mts, &output))
+    let mts = params.mts_params()?;
+    let output = MtsCurves::from(velocity_average_for_model(params, &mts)?);
+    Ok(signal_plot(&mts, &output))
 }

@@ -2,12 +2,12 @@ use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod_harmonics,
+    compute_demod_harmonics, DrivenAtomParams, HamiltonianParams, MtsParams,
 };
 use myplotlib::{AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
-use crate::app::{Params, common_control_groups};
+use crate::app::{common_control_groups, Params};
 use crate::units::{angular_gradient_to_per_mhz, frequency_slider};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
@@ -23,32 +23,38 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
             Slider::new("Maximum harmonic", &mut params.gradient_harmonics, 2..=50),
         ],
     );
+    let experiment = &mut params.experiment;
     let common = common_control_groups(
-        &mut params.mts.atom.hamiltonian,
-        &mut params.mts.atom.decay,
-        &mut params.mts.solver.kr_n,
-        &mut params.mts.solver.steps_per_period,
-        &mut params.mts.solver.n_periods,
+        &mut experiment.pump,
+        &mut experiment.probe,
+        &mut experiment.cell.transition,
+        &mut experiment.probe_detuning,
+        &mut experiment.modulation_frequency,
+        &mut experiment.modulation_depth,
+        &mut experiment.pump_probe_offset,
+        &mut experiment.pure_dephasing_rate,
+        &mut params.solver,
         &mut params.velocity,
     );
-    SliderGrid::new(5, common.into_iter().chain([gradient]))
+    SliderGrid::new(6, common.into_iter().chain([gradient]))
 }
 
 pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
+    let mts = params.mts_params()?;
     if !params.gradient_epsilon.is_finite() || params.gradient_epsilon <= 0.0 {
         return Err("finite-difference epsilon must be positive and finite".to_string());
     }
     if params.gradient_harmonics == 0 {
         return Err("maximum harmonic must be positive".to_string());
     }
-    if params.gradient_harmonics > params.mts.solver.steps_per_period / 2 {
+    if params.gradient_harmonics > mts.solver.steps_per_period / 2 {
         return Err(format!(
             "harmonic {} exceeds the Nyquist limit for {} steps per period",
-            params.gradient_harmonics, params.mts.solver.steps_per_period
+            params.gradient_harmonics, mts.solver.steps_per_period
         ));
     }
 
-    let samples = params.velocity_params().samples()?;
+    let samples = params.velocity_params(&mts).samples()?;
     let harmonics: Vec<_> = (0..=params.gradient_harmonics).collect();
     let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
 
@@ -61,12 +67,12 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
                     &MtsParams {
                         atom: DrivenAtomParams {
                             hamiltonian: HamiltonianParams {
-                                delta: params.mts.atom.hamiltonian.delta + offset,
-                                ..params.probe_hamiltonian(sample.kv)
+                                delta: mts.atom.hamiltonian.delta + offset,
+                                ..params.probe_hamiltonian(&mts, sample.kv)
                             },
-                            ..params.mts.atom
+                            ..mts.atom
                         },
-                        ..params.mts
+                        ..mts
                     },
                     observable,
                     &harmonics,
