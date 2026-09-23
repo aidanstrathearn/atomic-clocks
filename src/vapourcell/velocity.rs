@@ -6,6 +6,7 @@ pub struct VelocityParams {
     /// Mean Doppler shift in the coordinates used by the integration grid.
     pub mean: f64,
     /// Standard deviation of the Gaussian Doppler-shift distribution.
+    /// Zero selects a single velocity at `mean` with unit weight.
     pub sigma: f64,
     /// Half-width of the integration window centred on zero.
     pub half_width: f64,
@@ -29,8 +30,8 @@ impl VelocityParams {
         if !self.mean.is_finite() {
             return Err("Gaussian velocity mean must be finite".to_string());
         }
-        if !self.sigma.is_finite() || self.sigma <= 0.0 {
-            return Err("Gaussian velocity sigma must be positive and finite".to_string());
+        if !self.sigma.is_finite() || self.sigma < 0.0 {
+            return Err("Gaussian velocity sigma must be nonnegative and finite".to_string());
         }
         if !self.half_width.is_finite() || self.half_width <= 0.0 {
             return Err("velocity integration half-width must be positive and finite".to_string());
@@ -43,10 +44,19 @@ impl VelocityParams {
 
     /// Returns midpoint samples over a window fixed around zero.
     ///
+    /// A zero-width distribution returns one sample at `mean` with unit weight;
+    /// the integration window and sample count have no effect on that result.
+    ///
     /// Weights retain the Gaussian probability mass inside the truncated window
     /// rather than being renormalised to sum to one.
     pub fn samples(&self) -> Result<Vec<VelocitySample>, String> {
         self.validate()?;
+        if self.sigma == 0.0 {
+            return Ok(vec![VelocitySample {
+                kv: self.mean,
+                weight: 1.0,
+            }]);
+        }
         let step = 2.0 * self.half_width / self.sample_count as f64;
         Ok((0..self.sample_count)
             .map(|index| {
@@ -117,6 +127,20 @@ mod tests {
     }
 
     #[test]
+    fn zero_sigma_returns_one_unit_weight_sample_at_the_mean() {
+        let params = VelocityParams {
+            mean: 3.7,
+            sigma: 0.0,
+            half_width: 12.0,
+            sample_count: 999,
+        };
+        let samples = params.samples().unwrap();
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].kv, params.mean);
+        assert_eq!(samples[0].weight, 1.0);
+    }
+
+    #[test]
     fn samples_validate_the_distribution_and_grid() {
         for params in [
             VelocityParams {
@@ -124,7 +148,7 @@ mod tests {
                 ..VelocityParams::default()
             },
             VelocityParams {
-                sigma: 0.0,
+                sigma: -1.0,
                 ..VelocityParams::default()
             },
             VelocityParams {

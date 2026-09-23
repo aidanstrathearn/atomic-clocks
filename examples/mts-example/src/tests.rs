@@ -368,6 +368,11 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
             1e-15,
         );
     }
+    params.velocity.sigma = 0.0;
+    let zero_width_samples = params.velocity_params(&mts).samples().unwrap();
+    assert_eq!(zero_width_samples.len(), 1);
+    assert_close(zero_width_samples[0].kv, shift / 2.0, 1e-15);
+    assert_eq!(zero_width_samples[0].weight, 1.0);
 
     let solver = MtsSolverParams {
         kr_n: 3,
