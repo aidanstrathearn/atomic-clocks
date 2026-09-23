@@ -4,40 +4,11 @@ use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
     DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod_harmonics,
 };
-use myplotlib::{AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup};
+use myplotlib::{AppResult, AxisScale, Plotter};
 use rayon::prelude::*;
 
-use crate::app::{Params, common_control_groups};
-use crate::units::{angular_gradient_to_per_mhz, frequency_slider};
-
-pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
-    let gradient = SliderGroup::new(
-        "Harmonic gradient",
-        [
-            frequency_slider(
-                "Finite-difference epsilon",
-                &mut params.gradient_epsilon,
-                1e-6..=0.1,
-            )
-            .logarithmic(true),
-            Slider::new("Maximum harmonic", &mut params.gradient_harmonics, 2..=50),
-        ],
-    );
-    let experiment = &mut params.experiment;
-    let common = common_control_groups(
-        &mut experiment.pump,
-        &mut experiment.probe,
-        &mut experiment.cell,
-        &mut experiment.probe_detuning,
-        &mut experiment.modulation_frequency,
-        &mut experiment.modulation_depth,
-        &mut experiment.pump_probe_offset,
-        &mut experiment.pure_dephasing_rate,
-        &mut params.solver,
-        &mut params.velocity,
-    );
-    SliderGrid::new(6, common.into_iter().chain([gradient]))
-}
+use crate::app::Params;
+use crate::units::angular_gradient_to_per_mhz;
 
 pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
     let mts = params.mts_params()?;

@@ -5,55 +5,13 @@ use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
     DrivenAtomParams, LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
 };
-use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
+use myplotlib::{AppResult, Plotter};
 use rayon::prelude::*;
 
-use crate::app::{Params, common_control_groups};
+use crate::app::Params;
 use crate::units::to_mhz;
 
 const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
-
-pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
-    control_grid(params, true)
-}
-
-pub(super) fn demodulated_controls(params: &mut Params) -> SliderGrid<'_> {
-    control_grid(params, false)
-}
-
-fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
-    let time_step = 1.0 / params.solver.steps_per_period as f64;
-    let time_slider = show_time.then(|| {
-        Slider::new(
-            "Observation time (t / T)",
-            &mut params.response_time_fraction,
-            0.0..=1.0,
-        )
-        .step_by(time_step)
-    });
-    let response = SliderGroup::new(
-        "Linear response",
-        time_slider.into_iter().chain([Slider::new(
-            "Maximum delay (periods)",
-            &mut params.response_delay_periods,
-            1..=20,
-        )]),
-    );
-    let experiment = &mut params.experiment;
-    let common = common_control_groups(
-        &mut experiment.pump,
-        &mut experiment.probe,
-        &mut experiment.cell,
-        &mut experiment.probe_detuning,
-        &mut experiment.modulation_frequency,
-        &mut experiment.modulation_depth,
-        &mut experiment.pump_probe_offset,
-        &mut experiment.pure_dephasing_rate,
-        &mut params.solver,
-        &mut params.velocity,
-    );
-    SliderGrid::new(6, common.into_iter().chain([response]))
-}
 
 pub(super) fn response_at_velocity(
     params: &Params,

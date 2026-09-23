@@ -1,13 +1,13 @@
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
     DemodOutput, DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod,
 };
-use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
+use myplotlib::{AppResult, Plotter};
 use rayon::prelude::*;
 
-use crate::app::{Params, common_control_groups};
+use crate::app::Params;
 use crate::units::to_mhz;
 
 pub(super) const DC_HARMONICS: [usize; 1] = [0];
@@ -73,20 +73,6 @@ impl HarmonicCurves {
     }
 }
 
-fn scan_control_group<'a>(half_range: &'a mut f64, sample_count: &'a mut usize) -> SliderGroup<'a> {
-    SliderGroup::new(
-        "Scan",
-        [
-            Slider::new(
-                "Detuning half-range (MHz)",
-                half_range,
-                0.1 / TAU..=105.0 / TAU,
-            ),
-            Slider::new("Detuning samples", sample_count, 2..=200),
-        ],
-    )
-}
-
 fn new_signal_plot(params: &MtsParams) -> Plotter {
     let mut plot = Plotter::new();
     plot.xlabel("Detuning (MHz)");
@@ -128,27 +114,6 @@ fn harmonic_signal_plot(params: &MtsParams, output: &HarmonicCurves) -> Plotter 
 
 pub(super) fn display_detuning(params: &MtsParams, detuning: f64) -> f64 {
     detuning + params.atom.hamiltonian.modulation.shift / 2.0
-}
-
-pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
-    let experiment = &mut params.experiment;
-    let scan = scan_control_group(
-        &mut experiment.scan_half_range,
-        &mut experiment.scan_samples,
-    );
-    let common = common_control_groups(
-        &mut experiment.pump,
-        &mut experiment.probe,
-        &mut experiment.cell,
-        &mut experiment.probe_detuning,
-        &mut experiment.modulation_frequency,
-        &mut experiment.modulation_depth,
-        &mut experiment.pump_probe_offset,
-        &mut experiment.pure_dephasing_rate,
-        &mut params.solver,
-        &mut params.velocity,
-    );
-    SliderGrid::new(6, common.into_iter().chain([scan]))
 }
 
 fn scale_demod_output<const N: usize>(output: &mut DemodOutput<N>, weight: f64) {

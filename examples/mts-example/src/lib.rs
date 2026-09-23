@@ -1,11 +1,11 @@
 mod app;
+mod controls;
 mod gradients;
 mod probe;
 mod response;
 #[cfg(test)]
 mod tests;
 mod units;
-mod velocity;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_native() -> myplotlib::NativeResult {

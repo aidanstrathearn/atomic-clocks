@@ -4,9 +4,9 @@ use atomic_clocks::vapourcell::{
     Frame, HamiltonianParams, Laser, LinearResponseSolverParams, ModelTimeScale, MtsExperiment,
     MtsParams, MtsSolverParams, Transition, VapourCell, VelocityParams,
 };
-use myplotlib::{AppDefinition, Slider, SliderGroup, ViewOption};
+use myplotlib::{AppDefinition, ViewOption};
 
-use crate::{gradients, probe, response, velocity};
+use crate::{controls, gradients, probe, response};
 
 pub(crate) struct Params {
     pub(super) experiment: MtsExperiment,
@@ -98,177 +98,26 @@ impl Params {
     }
 }
 
-fn atom_control_groups<'a>(
-    pump: &'a mut Laser,
-    probe: &'a mut Laser,
-    cell: &'a mut VapourCell,
-    modulation_frequency: &'a mut f64,
-    modulation_depth: &'a mut f64,
-    pump_probe_offset: &'a mut f64,
-    pure_dephasing_rate: &'a mut f64,
-) -> [SliderGroup<'a>; 3] {
-    let VapourCell {
-        transition,
-        density_per_m3,
-        length_m,
-    } = cell;
-    let pump_power = &mut pump.power_milliwatts;
-    let probe_power = &mut probe.power_milliwatts;
-    let pump_waist = &mut pump.waist_radius_mm;
-    let probe_waist = &mut probe.waist_radius_mm;
-    let transition_wavelength = &mut transition.wavelength_nm;
-    let pump_wavelength = &mut pump.wavelength_nm;
-    let probe_wavelength = &mut probe.wavelength_nm;
-    let transition_linewidth = &mut transition.linewidth_hz;
-
-    let common_waist = Slider::from_get_set("Beam waist radius (mm)", 0.1..=5.0, move |waist| {
-        if let Some(waist) = waist {
-            *pump_waist = waist;
-            *probe_waist = waist;
-        }
-        *pump_waist
-    })
-    .logarithmic(true);
-    let common_wavelength = Slider::from_get_set(
-        "Transition wavelength (nm)",
-        400.0..=900.0,
-        move |wavelength| {
-            if let Some(wavelength) = wavelength {
-                *transition_wavelength = wavelength;
-                *pump_wavelength = wavelength;
-                *probe_wavelength = wavelength;
-            }
-            *transition_wavelength
-        },
-    );
-    let linewidth = Slider::from_get_set(
-        "Natural linewidth (MHz)",
-        1e-3..=10.0,
-        move |linewidth_mhz| {
-            if let Some(linewidth_mhz) = linewidth_mhz {
-                *transition_linewidth = linewidth_mhz * 1e6;
-            }
-            *transition_linewidth / 1e6
-        },
-    )
-    .logarithmic(true);
-    let density = Slider::new("Density (m⁻³)", density_per_m3, 1.0e8..=1.0e20)
-        .logarithmic(true)
-        .custom_formatter(|value, _| format!("{value:.2e}"));
-    let length = Slider::from_get_set("Cell length (mm)", 1.0..=1_000.0, move |length_mm| {
-        if let Some(length_mm) = length_mm {
-            *length_m = length_mm * 1.0e-3;
-        }
-        *length_m * 1.0e3
-    })
-    .logarithmic(true);
-
-    [
-        SliderGroup::new(
-            "Modulation",
-            [
-                Slider::new(
-                    "Frequency (MHz)",
-                    modulation_frequency,
-                    0.1 / TAU..=20.0 / TAU,
-                ),
-                Slider::new("Depth (MHz)", modulation_depth, 0.0..=20.0 / TAU),
-                Slider::new("Shift (MHz)", pump_probe_offset, -600.0 / TAU..=600.0 / TAU),
-            ],
-        ),
-        SliderGroup::new(
-            "Lasers",
-            [
-                Slider::new("Pump power (mW)", pump_power, 1e-6..=2.0).logarithmic(true),
-                Slider::new("Probe power (mW)", probe_power, 1e-6..=2.0).logarithmic(true),
-                common_waist,
-            ],
-        ),
-        SliderGroup::new(
-            "Transition and cell",
-            [
-                common_wavelength,
-                linewidth,
-                Slider::new(
-                    "Pure dephasing (MHz)",
-                    pure_dephasing_rate,
-                    0.0..=10.0 / TAU,
-                ),
-                density,
-                length,
-            ],
-        ),
-    ]
-}
-
-pub(super) fn common_control_groups<'a>(
-    pump: &'a mut Laser,
-    probe: &'a mut Laser,
-    cell: &'a mut VapourCell,
-    probe_detuning: &'a mut f64,
-    modulation_frequency: &'a mut f64,
-    modulation_depth: &'a mut f64,
-    pump_probe_offset: &'a mut f64,
-    pure_dephasing_rate: &'a mut f64,
-    solver_params: &'a mut MtsSolverParams,
-    velocity_params: &'a mut VelocityParams,
-) -> [SliderGroup<'a>; 5] {
-    *probe_detuning = 0.0;
-
-    let [modulation, lasers, transition_controls] = atom_control_groups(
-        pump,
-        probe,
-        cell,
-        modulation_frequency,
-        modulation_depth,
-        pump_probe_offset,
-        pure_dephasing_rate,
-    );
-    let velocity = velocity::control_group(velocity_params);
-    let MtsSolverParams {
-        kr_n,
-        steps_per_period,
-        n_periods,
-    } = solver_params;
-    let solver = SliderGroup::new(
-        "Solver",
-        [
-            Slider::new("Spatial phase samples", kr_n, 1..=21).step_by(2.0),
-            Slider::new("Steps per period", steps_per_period, 20..=1_000),
-            Slider::from_get_set("Warmup periods", 0.0..=100.0, move |warmup| {
-                if let Some(warmup) = warmup {
-                    *n_periods = warmup.round() as usize + 1;
-                }
-                n_periods.saturating_sub(1) as f64
-            })
-            .step_by(1.0),
-        ],
-    );
-
-    [modulation, lasers, transition_controls, velocity, solver]
-}
-
 pub(crate) fn definition() -> AppDefinition<Params> {
     const VIEWS: &[ViewOption<Params>] = &[
-        ViewOption::new("Harmonics", probe::harmonic_plot, probe::controls),
-        ViewOption::new("DC signal", probe::dc_plot, probe::controls),
-
-        //ViewOption::new("Linear response", response::plot, response::controls),
+        ViewOption::new("Harmonics", probe::harmonic_plot, controls::signal),
+        ViewOption::new("DC signal", probe::dc_plot, controls::signal),
+        //ViewOption::new("Linear response", response::plot, controls::response),
         ViewOption::new(
             "Linear response",
             response::demodulated_plot,
-            response::demodulated_controls,
+            controls::demodulated_response,
         ),
         ViewOption::new(
             "Transfer function",
             response::frequency_plot,
-            response::demodulated_controls,
+            controls::demodulated_response,
         ),
-        //ViewOption::new("Harmonic gradients", gradients::plot, gradients::controls),
+        //ViewOption::new("Harmonic gradients", gradients::plot, controls::gradients),
         ViewOption::new(
             "Intermod. noise",
             gradients::adjacent_plot,
-            gradients::controls,
+            controls::gradients,
         ),
     ];
     AppDefinition::new("MTS velocity", VIEWS)
