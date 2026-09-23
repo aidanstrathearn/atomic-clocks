@@ -80,7 +80,7 @@ fn scan_control_group<'a>(half_range: &'a mut f64, sample_count: &'a mut usize) 
             Slider::new(
                 "Detuning half-range (MHz)",
                 half_range,
-                0.1 / TAU..=65.0 / TAU,
+                0.1 / TAU..=105.0 / TAU,
             ),
             Slider::new("Detuning samples", sample_count, 2..=200),
         ],
