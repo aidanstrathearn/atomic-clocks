@@ -55,6 +55,15 @@ fn default_experiment_has_a_finite_nonzero_transmission_gain() {
     assert!(gain < 0.0);
 }
 
+#[test]
+fn default_experiment_uses_the_fixed_transition() {
+    let params = Params::default();
+    assert_eq!(params.experiment.cell.transition.wavelength_nm, 556.0);
+    assert_eq!(params.experiment.cell.transition.linewidth_hz, 182_000.0);
+    assert_eq!(params.experiment.pump.wavelength_nm, 556.0);
+    assert_eq!(params.experiment.probe.wavelength_nm, 556.0);
+}
+
 fn demod_at_velocity<const N: usize>(
     params: &Params,
     kv: f64,

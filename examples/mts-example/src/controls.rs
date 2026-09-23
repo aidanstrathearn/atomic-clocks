@@ -31,19 +31,14 @@ fn atom_control_groups<'a>(
     pure_dephasing_rate: &'a mut f64,
 ) -> [SliderGroup<'a>; 3] {
     let VapourCell {
-        transition,
         density_per_m3,
         length_m,
+        ..
     } = cell;
     let pump_power = &mut pump.power_milliwatts;
     let probe_power = &mut probe.power_milliwatts;
     let pump_waist = &mut pump.waist_radius_mm;
     let probe_waist = &mut probe.waist_radius_mm;
-    let transition_wavelength = &mut transition.wavelength_nm;
-    let pump_wavelength = &mut pump.wavelength_nm;
-    let probe_wavelength = &mut probe.wavelength_nm;
-    let transition_linewidth = &mut transition.linewidth_hz;
-
     let common_waist = Slider::from_get_set("Beam waist radius (mm)", 0.1..=5.0, move |waist| {
         if let Some(waist) = waist {
             *pump_waist = waist;
@@ -51,29 +46,6 @@ fn atom_control_groups<'a>(
         }
         *pump_waist
     })
-    .logarithmic(true);
-    let common_wavelength = Slider::from_get_set(
-        "Transition wavelength (nm)",
-        400.0..=900.0,
-        move |wavelength| {
-            if let Some(wavelength) = wavelength {
-                *transition_wavelength = wavelength;
-                *pump_wavelength = wavelength;
-                *probe_wavelength = wavelength;
-            }
-            *transition_wavelength
-        },
-    );
-    let linewidth = Slider::from_get_set(
-        "Natural linewidth (MHz)",
-        1e-3..=10.0,
-        move |linewidth_mhz| {
-            if let Some(linewidth_mhz) = linewidth_mhz {
-                *transition_linewidth = linewidth_mhz * 1e6;
-            }
-            *transition_linewidth / 1e6
-        },
-    )
     .logarithmic(true);
     let density = Slider::new("Density (m⁻³)", density_per_m3, 1.0e17..=1.0e20)
         .logarithmic(true)
@@ -110,8 +82,6 @@ fn atom_control_groups<'a>(
         SliderGroup::new(
             "Transition and cell",
             [
-                common_wavelength,
-                linewidth,
                 Slider::new(
                     "Pure dephasing (MHz)",
                     pure_dephasing_rate,
