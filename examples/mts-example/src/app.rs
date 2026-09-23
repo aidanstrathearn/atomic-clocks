@@ -26,18 +26,6 @@ impl Default for Params {
             // Reproduces the previous gamma_down = 1 rad / microsecond.
             linewidth_hz: 1.82e5 //1.0 / (TAU * time_scale.seconds_per_unit()),
         };
-        let laser_for_rabi = |rabi_per_model_time: f64| {
-            let mut laser = Laser {
-                power_milliwatts: 1.0,
-                waist_radius_mm: 1.0,
-                wavelength_nm: transition.wavelength_nm,
-            };
-            let rabi_at_one_milliwatt =
-                time_scale.angular_rate(transition.rabi_freq_radians_per_s(&laser));
-            laser.power_milliwatts = (rabi_per_model_time / rabi_at_one_milliwatt).powi(2);
-            laser
-        };
-
         Self {
             experiment: MtsExperiment {
                 time_scale,
@@ -47,12 +35,12 @@ impl Default for Params {
                     length_m: 0.02,
                 },
                 pump: Laser {
-                    power_milliwatts: 0.005,
+                    power_milliwatts: 0.02,
                     waist_radius_mm: 1.0,
                     wavelength_nm: transition.wavelength_nm,
                 },
                 probe: Laser {
-                    power_milliwatts: 0.002,
+                    power_milliwatts: 0.02,
                     waist_radius_mm: 1.0,
                     wavelength_nm: transition.wavelength_nm,
                 },
@@ -262,8 +250,9 @@ pub(super) fn common_control_groups<'a>(
 
 pub(crate) fn definition() -> AppDefinition<Params> {
     const VIEWS: &[ViewOption<Params>] = &[
-        ViewOption::new("DC signal", probe::dc_plot, probe::controls),
         ViewOption::new("Harmonics", probe::harmonic_plot, probe::controls),
+        ViewOption::new("DC signal", probe::dc_plot, probe::controls),
+
         //ViewOption::new("Linear response", response::plot, response::controls),
         ViewOption::new(
             "Linear response",
