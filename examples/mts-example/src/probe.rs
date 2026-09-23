@@ -105,7 +105,7 @@ fn dc_signal_plot(params: &MtsParams, output: &DcCurve) -> Plotter {
         .map(|&hz| to_mhz(display_detuning(params, hz)))
         .collect();
     plot.plot(&detunings_mhz, &output.values);
-    plot.ylabel("Mean transmission − 1");
+    plot.ylabel("Transmission");
     plot
 }
 
