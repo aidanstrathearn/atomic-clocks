@@ -83,7 +83,7 @@ fn response_output_for_model(
     params: &Params,
     mts: &atomic_clocks::vapourcell::MtsParams,
 ) -> Result<LinearResponseOutput, String> {
-    let samples = params.velocity_params(mts).samples()?;
+    let samples = params.velocity_params(mts)?.samples()?;
 
     // Bound retained matrices by the worker count, and retain a fixed sample/chunk
     // order so floating-point sums do not depend on scheduling.

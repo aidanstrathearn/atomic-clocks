@@ -1,11 +1,9 @@
 use std::f64::consts::TAU;
 
-use atomic_clocks::vapourcell::{
-    Laser, MtsExperiment, MtsSolverParams, VapourCell, VelocityParams,
-};
+use atomic_clocks::vapourcell::{Laser, MtsExperiment, MtsSolverParams, VapourCell};
 use myplotlib::{Slider, SliderGrid, SliderGroup};
 
-use crate::app::Params;
+use crate::app::{Params, VelocityIntegrationParams};
 use crate::units::frequency_slider;
 
 struct CommonControls<'a> {
@@ -18,7 +16,7 @@ struct CommonControls<'a> {
     pump_probe_offset: &'a mut f64,
     pure_dephasing_rate: &'a mut f64,
     solver: &'a mut MtsSolverParams,
-    velocity: &'a mut VelocityParams,
+    velocity: &'a mut VelocityIntegrationParams,
 }
 
 fn atom_control_groups<'a>(
@@ -94,13 +92,14 @@ fn atom_control_groups<'a>(
     ]
 }
 
-fn velocity_control_group(params: &mut VelocityParams) -> SliderGroup<'_> {
+fn velocity_control_group(params: &mut VelocityIntegrationParams) -> SliderGroup<'_> {
     SliderGroup::new(
         "Velocity distribution",
         [
             frequency_slider("Sigma", &mut params.sigma, 0.0..=3000.0).logarithmic(true),
             frequency_slider("Integration window", &mut params.half_width, 0.1..=200.0),
-            Slider::new("Midpoint samples", &mut params.sample_count, 1..=201).step_by(2.0),
+            frequency_slider("Maximum velocity step", &mut params.max_step, 0.05 * TAU..=5.0 * TAU)
+                .logarithmic(true),
         ],
     )
 }
@@ -156,7 +155,7 @@ fn common_control_groups(params: CommonControls<'_>) -> [SliderGroup<'_>; 5] {
 fn common_controls<'a>(
     experiment: &'a mut MtsExperiment,
     solver: &'a mut MtsSolverParams,
-    velocity: &'a mut VelocityParams,
+    velocity: &'a mut VelocityIntegrationParams,
 ) -> CommonControls<'a> {
     CommonControls {
         pump: &mut experiment.pump,

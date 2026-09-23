@@ -25,7 +25,7 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
         ));
     }
 
-    let samples = params.velocity_params(&mts).samples()?;
+    let samples = params.velocity_params(&mts)?.samples()?;
     let harmonics: Vec<_> = (0..=params.gradient_harmonics).collect();
     let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
 

@@ -159,7 +159,7 @@ fn velocity_average_for_model<const N: usize>(
     mts: &MtsParams,
     harmonics: [usize; N],
 ) -> Result<DemodOutput<N>, String> {
-    let samples = params.velocity_params(mts).samples()?;
+    let samples = params.velocity_params(mts)?.samples()?;
     let probe = MtsParams {
         atom: DrivenAtomParams {
             hamiltonian: params.probe_hamiltonian(mts, 0.0),

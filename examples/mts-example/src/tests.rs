@@ -6,10 +6,10 @@ use atomic_clocks::maths::normalised_gaussian;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
     DemodOutput, DrivenAtomParams, HamiltonianParams, LinearResponseOutput, MtsParams,
-    MtsSolverParams, VelocityParams, compute_demod,
+    MtsSolverParams, compute_demod,
 };
 
-use crate::app::Params;
+use crate::app::{Params, VelocityIntegrationParams};
 use crate::gradients::{harmonic_gradients, normalised_adjacent_gradient_sums};
 use crate::probe::{DC_HARMONICS, DcCurve, HarmonicCurves, MODULATION_HARMONICS, velocity_average};
 use crate::response::{demodulated_transmission_response, response_at_velocity, response_output};
@@ -62,6 +62,35 @@ fn default_experiment_uses_the_fixed_transition() {
     assert_eq!(params.experiment.cell.transition.linewidth_hz, 182_000.0);
     assert_eq!(params.experiment.pump.wavelength_nm, 556.0);
     assert_eq!(params.experiment.probe.wavelength_nm, 556.0);
+}
+
+#[test]
+fn velocity_step_preserves_the_window_with_an_odd_sample_count() {
+    let mut params = Params::default();
+    params.velocity = VelocityIntegrationParams {
+        sigma: 2.0,
+        half_width: 2.0,
+        max_step: 1.0,
+    };
+    let mts = params.mts_params().unwrap();
+    let velocity = params.velocity_params(&mts).unwrap();
+    let samples = velocity.samples().unwrap();
+
+    assert_eq!(velocity.sample_count, 5);
+    assert!(2.0 * velocity.half_width / velocity.sample_count as f64 <= params.velocity.max_step);
+    assert_eq!(samples[velocity.sample_count / 2].kv, 0.0);
+    assert_close(samples[0].kv, -1.6, 1e-15);
+    assert_close(samples[4].kv, 1.6, 1e-15);
+}
+
+#[test]
+fn velocity_step_must_be_positive_and_finite() {
+    for max_step in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut params = Params::default();
+        params.velocity.max_step = max_step;
+        let mts = params.mts_params().unwrap();
+        assert!(params.velocity_params(&mts).is_err());
+    }
 }
 
 fn demod_at_velocity<const N: usize>(
@@ -193,11 +222,10 @@ fn small_params() -> Params {
         n_periods: 2,
     };
     params.experiment.scan_samples = 7;
-    params.velocity = VelocityParams {
+    params.velocity = VelocityIntegrationParams {
         sigma: 2.0,
         half_width: 1.5,
-        sample_count: 3,
-        ..VelocityParams::default()
+        max_step: 1.0,
     };
     params
 }
@@ -207,7 +235,7 @@ fn weighted_signal_matches_serial_signed_coefficients() {
     let params = small_params();
     let average = velocity_average(&params, TEST_HARMONICS).unwrap();
     let mts = params.mts_params().unwrap();
-    let samples = params.velocity_params(&mts).samples().unwrap();
+    let samples = params.velocity_params(&mts).unwrap().samples().unwrap();
     let reference: Vec<_> = samples
         .iter()
         .map(|sample| {
@@ -326,7 +354,7 @@ fn weighted_response_matches_serial_kernels() {
     };
     let sum = response_output(&params).unwrap();
     let mts = params.mts_params().unwrap();
-    let samples = params.velocity_params(&mts).samples().unwrap();
+    let samples = params.velocity_params(&mts).unwrap().samples().unwrap();
     let reference: Vec<_> = samples
         .iter()
         .map(|sample| {
@@ -357,11 +385,10 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
     let sigma = 2.7;
     let mut params = Params::default();
     params.experiment.pump_probe_offset = shift / TAU;
-    params.velocity = VelocityParams {
+    params.velocity = VelocityIntegrationParams {
         sigma,
         half_width: 1.5,
-        sample_count: 3,
-        ..VelocityParams::default()
+        max_step: 1.0,
     };
     let mts = params.mts_params().unwrap();
     assert_eq!(params.probe_hamiltonian(&mts, 0.0).modulation.shift, 0.0);
@@ -370,7 +397,7 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
         relative_delta + shift / 2.0,
         1e-15,
     );
-    for sample in params.velocity_params(&mts).samples().unwrap() {
+    for sample in params.velocity_params(&mts).unwrap().samples().unwrap() {
         assert_close(
             sample.weight,
             normalised_gaussian(sample.kv, shift / 2.0, sigma),
@@ -378,7 +405,7 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
         );
     }
     params.velocity.sigma = 0.0;
-    let zero_width_samples = params.velocity_params(&mts).samples().unwrap();
+    let zero_width_samples = params.velocity_params(&mts).unwrap().samples().unwrap();
     assert_eq!(zero_width_samples.len(), 1);
     assert_close(zero_width_samples[0].kv, shift / 2.0, 1e-15);
     assert_eq!(zero_width_samples[0].weight, 1.0);
@@ -472,11 +499,10 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
         steps_per_period: 128,
         n_periods: 13,
     };
-    params.velocity = VelocityParams {
+    params.velocity = VelocityIntegrationParams {
         sigma: 2.0,
         half_width: 1.5,
-        sample_count: 5,
-        ..VelocityParams::default()
+        max_step: 0.6,
     };
     params.response_delay_periods = 6;
     let response = response_output(&params).unwrap();
