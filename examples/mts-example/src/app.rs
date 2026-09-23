@@ -262,7 +262,8 @@ pub(super) fn common_control_groups<'a>(
 
 pub(crate) fn definition() -> AppDefinition<Params> {
     const VIEWS: &[ViewOption<Params>] = &[
-        ViewOption::new("Signal", probe::plot, probe::controls),
+        ViewOption::new("DC signal", probe::dc_plot, probe::controls),
+        ViewOption::new("Harmonics", probe::harmonic_plot, probe::controls),
         //ViewOption::new("Linear response", response::plot, response::controls),
         ViewOption::new(
             "Linear response",

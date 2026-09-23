@@ -10,42 +10,62 @@ use rayon::prelude::*;
 use crate::app::{Params, common_control_groups};
 use crate::units::to_mhz;
 
-pub(super) const SIGNAL_HARMONICS: [usize; 4] = [0, 1, 2, 3];
-pub(super) type SignalOutput = DemodOutput<{ SIGNAL_HARMONICS.len() }>;
+pub(super) const DC_HARMONICS: [usize; 1] = [0];
+pub(super) const MODULATION_HARMONICS: [usize; 3] = [1, 2, 3];
+pub(super) type DcOutput = DemodOutput<{ DC_HARMONICS.len() }>;
+pub(super) type HarmonicOutput = DemodOutput<{ MODULATION_HARMONICS.len() }>;
 
-/// Scalar curves derived from one combined demodulation output for plotting.
-pub(super) struct MtsCurves {
+pub(super) struct DcCurve {
     pub hz: Vec<f64>,
-    pub dc: Vec<f64>,
-    pub proj1: Vec<f64>,
-    pub proj2: Vec<f64>,
-    pub proj3: Vec<f64>,
+    pub values: Vec<f64>,
 }
 
-impl MtsCurves {
-    /// Builds normalized-transmission curves with `gain = -F`.
-    pub(super) fn from_demodulated(output: SignalOutput, gain: f64) -> Self {
+impl DcCurve {
+    /// Builds mean transmission minus one with `gain = -F`.
+    pub(super) fn from_demodulated(output: DcOutput, gain: f64) -> Self {
         let DemodOutput {
             hz,
             harmonics,
             values,
         } = output;
-        assert_eq!(harmonics, SIGNAL_HARMONICS);
-        let mut dc = Vec::with_capacity(values.len());
+        assert_eq!(harmonics, DC_HARMONICS);
+        let values = values
+            .into_iter()
+            .map(|[raw_dc]| {
+                // Harmonic zero is twice the mean so need factor of 0.5
+                1.0 + 0.5 * gain * raw_dc.in_phase
+            })
+            .collect();
+        Self { hz, values }
+    }
+}
+
+pub(super) struct HarmonicCurves {
+    pub hz: Vec<f64>,
+    pub proj1: Vec<f64>,
+    pub proj2: Vec<f64>,
+    pub proj3: Vec<f64>,
+}
+
+impl HarmonicCurves {
+    /// Builds normalized-transmission harmonics with `gain = -F`.
+    pub(super) fn from_demodulated(output: HarmonicOutput, gain: f64) -> Self {
+        let DemodOutput {
+            hz,
+            harmonics,
+            values,
+        } = output;
+        assert_eq!(harmonics, MODULATION_HARMONICS);
         let mut proj1 = Vec::with_capacity(values.len());
         let mut proj2 = Vec::with_capacity(values.len());
         let mut proj3 = Vec::with_capacity(values.len());
-        for [raw_dc, first, second, third] in values {
-            // Harmonic zero is twice the mean. Omitting the unit transmission
-            // baseline directly gives mean transmission minus one.
-            dc.push(0.5 * gain * raw_dc.in_phase);
+        for [first, second, third] in values {
             proj1.push(gain * first.in_phase);
             proj2.push(gain * second.in_phase);
             proj3.push(gain * third.in_phase);
         }
         Self {
             hz,
-            dc,
             proj1,
             proj2,
             proj3,
@@ -67,27 +87,42 @@ fn scan_control_group<'a>(half_range: &'a mut f64, sample_count: &'a mut usize) 
     )
 }
 
-fn signal_plot(params: &MtsParams, output: &MtsCurves) -> Plotter {
+fn new_signal_plot(params: &MtsParams) -> Plotter {
     let mut plot = Plotter::new();
+    plot.xlabel("Detuning (MHz)");
+    plot.xlim(
+        to_mhz(display_detuning(params, -params.scan.hz_lim)),
+        to_mhz(display_detuning(params, params.scan.hz_lim)),
+    );
+    plot
+}
+
+fn dc_signal_plot(params: &MtsParams, output: &DcCurve) -> Plotter {
+    let mut plot = new_signal_plot(params);
     let detunings_mhz: Vec<_> = output
         .hz
         .iter()
         .map(|&hz| to_mhz(display_detuning(params, hz)))
         .collect();
-    plot.plot(&detunings_mhz, &output.dc)
-        .label("Mean transmission − 1");
+    plot.plot(&detunings_mhz, &output.values);
+    plot.ylabel("Mean transmission − 1");
+    plot
+}
+
+fn harmonic_signal_plot(params: &MtsParams, output: &HarmonicCurves) -> Plotter {
+    let mut plot = new_signal_plot(params);
+    let detunings_mhz: Vec<_> = output
+        .hz
+        .iter()
+        .map(|&hz| to_mhz(display_detuning(params, hz)))
+        .collect();
     plot.plot(&detunings_mhz, &output.proj1)
         .label("First harmonic");
     plot.plot(&detunings_mhz, &output.proj2)
         .label("Second harmonic");
     plot.plot(&detunings_mhz, &output.proj3)
         .label("Third harmonic");
-    plot.xlabel("Detuning (MHz)");
     plot.ylabel("Normalized transmission change");
-    plot.xlim(
-        to_mhz(display_detuning(params, -params.scan.hz_lim)),
-        to_mhz(display_detuning(params, params.scan.hz_lim)),
-    );
     plot
 }
 
@@ -145,12 +180,20 @@ fn add_demod_output<const N: usize>(
     Ok(())
 }
 
-pub(super) fn velocity_average(params: &Params) -> Result<SignalOutput, String> {
+#[cfg(test)]
+pub(super) fn velocity_average<const N: usize>(
+    params: &Params,
+    harmonics: [usize; N],
+) -> Result<DemodOutput<N>, String> {
     let mts = params.mts_params()?;
-    velocity_average_for_model(params, &mts)
+    velocity_average_for_model(params, &mts, harmonics)
 }
 
-fn velocity_average_for_model(params: &Params, mts: &MtsParams) -> Result<SignalOutput, String> {
+fn velocity_average_for_model<const N: usize>(
+    params: &Params,
+    mts: &MtsParams,
+    harmonics: [usize; N],
+) -> Result<DemodOutput<N>, String> {
     let samples = params.velocity_params(mts).samples()?;
     let probe = MtsParams {
         atom: DrivenAtomParams {
@@ -176,7 +219,7 @@ fn velocity_average_for_model(params: &Params, mts: &MtsParams) -> Result<Signal
                     ..probe
                 },
                 Vec3::from_angles(FRAC_PI_2, FRAC_PI_2),
-                SIGNAL_HARMONICS,
+                harmonics,
             )
             .map(|output| (sample.weight, output))
         })
@@ -191,9 +234,22 @@ fn velocity_average_for_model(params: &Params, mts: &MtsParams) -> Result<Signal
     Ok(average)
 }
 
-pub(super) fn plot(params: &mut Params) -> AppResult {
+pub(super) fn dc_plot(params: &mut Params) -> AppResult {
     let mts = params.mts_params()?;
     let gain = params.transmission_gain()?;
-    let output = MtsCurves::from_demodulated(velocity_average_for_model(params, &mts)?, gain);
-    Ok(signal_plot(&mts, &output))
+    let output = DcCurve::from_demodulated(
+        velocity_average_for_model(params, &mts, DC_HARMONICS)?,
+        gain,
+    );
+    Ok(dc_signal_plot(&mts, &output))
+}
+
+pub(super) fn harmonic_plot(params: &mut Params) -> AppResult {
+    let mts = params.mts_params()?;
+    let gain = params.transmission_gain()?;
+    let output = HarmonicCurves::from_demodulated(
+        velocity_average_for_model(params, &mts, MODULATION_HARMONICS)?,
+        gain,
+    );
+    Ok(harmonic_signal_plot(&mts, &output))
 }

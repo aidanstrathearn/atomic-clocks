@@ -11,8 +11,10 @@ use atomic_clocks::vapourcell::{
 
 use crate::app::Params;
 use crate::gradients::{harmonic_gradients, normalised_adjacent_gradient_sums};
-use crate::probe::{MtsCurves, SIGNAL_HARMONICS, SignalOutput, velocity_average};
+use crate::probe::{DC_HARMONICS, DcCurve, HarmonicCurves, MODULATION_HARMONICS, velocity_average};
 use crate::response::{demodulated_transmission_response, response_at_velocity, response_output};
+
+const TEST_HARMONICS: [usize; 4] = [0, 1, 2, 3];
 
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
@@ -53,7 +55,11 @@ fn default_experiment_has_a_finite_nonzero_transmission_gain() {
     assert!(gain < 0.0);
 }
 
-fn demod_at_velocity(params: &Params, kv: f64) -> SignalOutput {
+fn demod_at_velocity<const N: usize>(
+    params: &Params,
+    kv: f64,
+    harmonics: [usize; N],
+) -> DemodOutput<N> {
     let mts = params.mts_params().unwrap();
     compute_demod(
         &MtsParams {
@@ -68,7 +74,7 @@ fn demod_at_velocity(params: &Params, kv: f64) -> SignalOutput {
             y: 1.0,
             z: 0.0,
         },
-        SIGNAL_HARMONICS,
+        harmonics,
     )
     .unwrap()
 }
@@ -103,16 +109,14 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
                     })
                     .sum::<f64>()
             };
-            let raw = demod_at_velocity(&params, kv);
-            let curves = MtsCurves::from_demodulated(raw, 1.0);
+            let raw = demod_at_velocity(&params, kv, TEST_HARMONICS);
             // Harmonic zero returns twice the mean.
             let integrated = [0.5 * integrate(0), integrate(1), integrate(2), integrate(3)];
-            let slopes = [
-                (curves.dc[2] - curves.dc[0]) / (2.0 * epsilon),
-                (curves.proj1[2] - curves.proj1[0]) / (2.0 * epsilon),
-                (curves.proj2[2] - curves.proj2[0]) / (2.0 * epsilon),
-                (curves.proj3[2] - curves.proj3[0]) / (2.0 * epsilon),
-            ];
+            let slopes: [f64; 4] = std::array::from_fn(|index| {
+                let dc_scale = if index == 0 { 0.5 } else { 1.0 };
+                dc_scale * (raw.values[2][index].in_phase - raw.values[0][index].in_phase)
+                    / (2.0 * epsilon)
+            });
             eprintln!(
                 "delta={delta}, kv={kv}, steps={steps_per_period}: integrals={integrated:?}, slopes={slopes:?}"
             );
@@ -138,14 +142,18 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
 
 #[test]
 fn transmission_curves_apply_one_gain_to_signed_components() {
-    let raw = DemodOutput {
+    let dc_raw = DemodOutput {
         hz: vec![0.0],
-        harmonics: SIGNAL_HARMONICS,
+        harmonics: DC_HARMONICS,
+        values: vec![[Demodulation {
+            in_phase: 0.8,
+            quadrature: 0.0,
+        }]],
+    };
+    let harmonic_raw = DemodOutput {
+        hz: vec![0.0],
+        harmonics: MODULATION_HARMONICS,
         values: vec![[
-            Demodulation {
-                in_phase: 0.8,
-                quadrature: 0.0,
-            },
             Demodulation {
                 in_phase: -0.4,
                 quadrature: 0.1,
@@ -160,11 +168,12 @@ fn transmission_curves_apply_one_gain_to_signed_components() {
             },
         ]],
     };
-    let curves = MtsCurves::from_demodulated(raw, -0.25);
-    assert_eq!(curves.dc, [-0.1]);
-    assert_eq!(curves.proj1, [0.1]);
-    assert_eq!(curves.proj2, [-0.05]);
-    assert_eq!(curves.proj3, [0.025]);
+    let dc = DcCurve::from_demodulated(dc_raw, -0.25);
+    let harmonics = HarmonicCurves::from_demodulated(harmonic_raw, -0.25);
+    assert_eq!(dc.values, [-0.1]);
+    assert_eq!(harmonics.proj1, [0.1]);
+    assert_eq!(harmonics.proj2, [-0.05]);
+    assert_eq!(harmonics.proj3, [0.025]);
 }
 
 fn small_params() -> Params {
@@ -187,18 +196,23 @@ fn small_params() -> Params {
 #[test]
 fn weighted_signal_matches_serial_signed_coefficients() {
     let params = small_params();
-    let average = velocity_average(&params).unwrap();
+    let average = velocity_average(&params, TEST_HARMONICS).unwrap();
     let mts = params.mts_params().unwrap();
     let samples = params.velocity_params(&mts).samples().unwrap();
     let reference: Vec<_> = samples
         .iter()
-        .map(|sample| (sample.weight, demod_at_velocity(&params, sample.kv)))
+        .map(|sample| {
+            (
+                sample.weight,
+                demod_at_velocity(&params, sample.kv, TEST_HARMONICS),
+            )
+        })
         .collect();
 
     assert_eq!(average.hz, reference[0].1.hz);
-    assert_eq!(average.harmonics, SIGNAL_HARMONICS);
+    assert_eq!(average.harmonics, TEST_HARMONICS);
     for index in 0..average.hz.len() {
-        for harmonic_index in 0..SIGNAL_HARMONICS.len() {
+        for harmonic_index in 0..TEST_HARMONICS.len() {
             let expected = reference
                 .iter()
                 .map(|(weight, output)| {
@@ -222,9 +236,9 @@ fn harmonic_gradients_match_the_plotted_in_phase_signal_slopes() {
     params.gradient_epsilon = epsilon;
     params.gradient_harmonics = 3;
     let gradients = harmonic_gradients(&params).unwrap();
-    let signal = velocity_average(&params).unwrap();
+    let signal = velocity_average(&params, MODULATION_HARMONICS).unwrap();
 
-    for (actual, harmonic_index) in gradients.into_iter().skip(1).zip(1..=3) {
+    for (actual, harmonic_index) in gradients.into_iter().skip(1).zip(0..3) {
         let expected = (signal.values[1][harmonic_index].in_phase
             - signal.values[0][harmonic_index].in_phase)
             / (2.0 * epsilon);
@@ -410,7 +424,7 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
                 y: 1.0,
                 z: 0.0,
             },
-            SIGNAL_HARMONICS,
+            TEST_HARMONICS,
         )
         .unwrap();
         let zero_shift = compute_demod(
@@ -420,7 +434,7 @@ fn shift_is_absorbed_into_velocity_and_detuning_coordinates() {
                 y: 1.0,
                 z: 0.0,
             },
-            SIGNAL_HARMONICS,
+            TEST_HARMONICS,
         )
         .unwrap();
         for (actual, expected) in finite_shift.values.iter().zip(zero_shift.values) {
@@ -460,22 +474,25 @@ fn integrated_weighted_response_matches_weighted_signal_slope() {
             0.5 * (times[1] - times[0]) * (values[0].in_phase + values[1].in_phase)
         })
         .sum::<f64>();
-    let signal = velocity_average(&params).unwrap();
-    let slope = (signal.values[2][1].in_phase - signal.values[0][1].in_phase) / (2.0 * epsilon);
+    let signal = velocity_average(&params, [1]).unwrap();
+    let slope = (signal.values[2][0].in_phase - signal.values[0][0].in_phase) / (2.0 * epsilon);
     assert_close(integral, slope, 2e-5);
 }
 
 #[test]
 fn default_velocity_scan_is_finite() {
     let params = Params::default();
-    let average = velocity_average(&params).unwrap();
-    assert_eq!(average.harmonics, SIGNAL_HARMONICS);
-    assert_eq!(average.values.len(), params.experiment.scan_samples);
+    let dc = velocity_average(&params, DC_HARMONICS).unwrap();
+    let harmonics = velocity_average(&params, MODULATION_HARMONICS).unwrap();
+    assert_eq!(dc.harmonics, DC_HARMONICS);
+    assert_eq!(harmonics.harmonics, MODULATION_HARMONICS);
+    assert_eq!(dc.values.len(), params.experiment.scan_samples);
+    assert_eq!(harmonics.values.len(), params.experiment.scan_samples);
     assert!(
-        average
-            .values
+        dc.values
             .iter()
             .flatten()
+            .chain(harmonics.values.iter().flatten())
             .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite())
     );
 }
