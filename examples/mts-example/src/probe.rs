@@ -2,12 +2,12 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    compute_demod, DemodOutput, DrivenAtomParams, HamiltonianParams, MtsParams,
+    DemodOutput, DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod,
 };
 use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
-use crate::app::{common_control_groups, Params};
+use crate::app::{Params, common_control_groups};
 use crate::units::to_mhz;
 
 pub(super) const SIGNAL_HARMONICS: [usize; 4] = [0, 1, 2, 3];
@@ -16,33 +16,36 @@ pub(super) type SignalOutput = DemodOutput<{ SIGNAL_HARMONICS.len() }>;
 /// Scalar curves derived from one combined demodulation output for plotting.
 pub(super) struct MtsCurves {
     pub hz: Vec<f64>,
-    pub amp0: Vec<f64>,
+    pub dc: Vec<f64>,
     pub proj1: Vec<f64>,
     pub proj2: Vec<f64>,
     pub proj3: Vec<f64>,
 }
 
-impl From<SignalOutput> for MtsCurves {
-    fn from(output: SignalOutput) -> Self {
+impl MtsCurves {
+    /// Builds normalized-transmission curves with `gain = -F`.
+    pub(super) fn from_demodulated(output: SignalOutput, gain: f64) -> Self {
         let DemodOutput {
             hz,
             harmonics,
             values,
         } = output;
         assert_eq!(harmonics, SIGNAL_HARMONICS);
-        let mut amp0 = Vec::with_capacity(values.len());
+        let mut dc = Vec::with_capacity(values.len());
         let mut proj1 = Vec::with_capacity(values.len());
         let mut proj2 = Vec::with_capacity(values.len());
         let mut proj3 = Vec::with_capacity(values.len());
-        for [dc, first, second, third] in values {
-            amp0.push(dc.amplitude() / 2.0);
-            proj1.push(first.in_phase);
-            proj2.push(second.in_phase);
-            proj3.push(third.in_phase);
+        for [raw_dc, first, second, third] in values {
+            // Harmonic zero is twice the mean. Omitting the unit transmission
+            // baseline directly gives mean transmission minus one.
+            dc.push(0.5 * gain * raw_dc.in_phase);
+            proj1.push(gain * first.in_phase);
+            proj2.push(gain * second.in_phase);
+            proj3.push(gain * third.in_phase);
         }
         Self {
             hz,
-            amp0,
+            dc,
             proj1,
             proj2,
             proj3,
@@ -71,8 +74,8 @@ fn signal_plot(params: &MtsParams, output: &MtsCurves) -> Plotter {
         .iter()
         .map(|&hz| to_mhz(display_detuning(params, hz)))
         .collect();
-    let minus_amp0: Vec<_> = output.amp0.iter().map(|x| -x).collect();
-    plot.plot(&detunings_mhz, &minus_amp0).label("DC");
+    plot.plot(&detunings_mhz, &output.dc)
+        .label("Mean transmission − 1");
     plot.plot(&detunings_mhz, &output.proj1)
         .label("First harmonic");
     plot.plot(&detunings_mhz, &output.proj2)
@@ -80,7 +83,7 @@ fn signal_plot(params: &MtsParams, output: &MtsCurves) -> Plotter {
     plot.plot(&detunings_mhz, &output.proj3)
         .label("Third harmonic");
     plot.xlabel("Detuning (MHz)");
-    plot.ylabel("Demodulated signal");
+    plot.ylabel("Normalized transmission change");
     plot.xlim(
         to_mhz(display_detuning(params, -params.scan.hz_lim)),
         to_mhz(display_detuning(params, params.scan.hz_lim)),
@@ -101,7 +104,7 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     let common = common_control_groups(
         &mut experiment.pump,
         &mut experiment.probe,
-        &mut experiment.cell.transition,
+        &mut experiment.cell,
         &mut experiment.probe_detuning,
         &mut experiment.modulation_frequency,
         &mut experiment.modulation_depth,
@@ -190,6 +193,7 @@ fn velocity_average_for_model(params: &Params, mts: &MtsParams) -> Result<Signal
 
 pub(super) fn plot(params: &mut Params) -> AppResult {
     let mts = params.mts_params()?;
-    let output = MtsCurves::from(velocity_average_for_model(params, &mts)?);
+    let gain = params.transmission_gain()?;
+    let output = MtsCurves::from_demodulated(velocity_average_for_model(params, &mts)?, gain);
     Ok(signal_plot(&mts, &output))
 }

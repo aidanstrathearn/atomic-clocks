@@ -1,17 +1,18 @@
 use std::f64::consts::TAU;
 
 use atomic_clocks::common::DetuningScanParams;
-use atomic_clocks::maths::demodulation::ModulationParams;
+use atomic_clocks::maths::demodulation::{Demodulation, ModulationParams};
 use atomic_clocks::maths::normalised_gaussian;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    compute_demod, DrivenAtomParams, HamiltonianParams, MtsParams, MtsSolverParams, VelocityParams,
+    DemodOutput, DrivenAtomParams, HamiltonianParams, LinearResponseOutput, MtsParams,
+    MtsSolverParams, VelocityParams, compute_demod,
 };
 
 use crate::app::Params;
 use crate::gradients::{harmonic_gradients, normalised_adjacent_gradient_sums};
-use crate::probe::{velocity_average, MtsCurves, SignalOutput, SIGNAL_HARMONICS};
-use crate::response::{response_at_velocity, response_output};
+use crate::probe::{MtsCurves, SIGNAL_HARMONICS, SignalOutput, velocity_average};
+use crate::response::{demodulated_transmission_response, response_at_velocity, response_output};
 
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
@@ -28,6 +29,8 @@ fn default_experiment_reproduces_the_previous_model_rates() {
     assert_eq!(params.experiment.cell.transition.wavelength_nm, 556.0);
     assert_eq!(params.experiment.pump.waist_radius_mm, 1.0);
     assert_eq!(params.experiment.probe.waist_radius_mm, 1.0);
+    assert_eq!(params.experiment.cell.density_per_m3, 1.0e14);
+    assert_eq!(params.experiment.cell.length_m, 0.1);
     assert_close(mts.atom.hamiltonian.r_pump, 1.0, 1e-14);
     assert_close(mts.atom.hamiltonian.r_prbe, 0.1, 1e-14);
     assert_close(mts.atom.decay.gamma_down, 1.0, 1e-14);
@@ -41,6 +44,13 @@ fn default_experiment_reproduces_the_previous_model_rates() {
         0.000_038_021_640_243_5,
         1e-14,
     );
+}
+
+#[test]
+fn default_experiment_has_a_finite_nonzero_transmission_gain() {
+    let gain = Params::default().transmission_gain().unwrap();
+    assert!(gain.is_finite());
+    assert!(gain < 0.0);
 }
 
 fn demod_at_velocity(params: &Params, kv: f64) -> SignalOutput {
@@ -94,17 +104,11 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
                     .sum::<f64>()
             };
             let raw = demod_at_velocity(&params, kv);
-            let dc_sign = raw.values[1][0].in_phase.signum();
-            let curves = MtsCurves::from(raw);
-            // Probe plots -abs(mean) for DC; harmonic zero returns 2*mean.
-            let integrated = [
-                -0.5 * dc_sign * integrate(0),
-                integrate(1),
-                integrate(2),
-                integrate(3),
-            ];
+            let curves = MtsCurves::from_demodulated(raw, 1.0);
+            // Harmonic zero returns twice the mean.
+            let integrated = [0.5 * integrate(0), integrate(1), integrate(2), integrate(3)];
             let slopes = [
-                (curves.amp0[0] - curves.amp0[2]) / (2.0 * epsilon),
+                (curves.dc[2] - curves.dc[0]) / (2.0 * epsilon),
                 (curves.proj1[2] - curves.proj1[0]) / (2.0 * epsilon),
                 (curves.proj2[2] - curves.proj2[0]) / (2.0 * epsilon),
                 (curves.proj3[2] - curves.proj3[0]) / (2.0 * epsilon),
@@ -130,6 +134,37 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
             }
         }
     }
+}
+
+#[test]
+fn transmission_curves_apply_one_gain_to_signed_components() {
+    let raw = DemodOutput {
+        hz: vec![0.0],
+        harmonics: SIGNAL_HARMONICS,
+        values: vec![[
+            Demodulation {
+                in_phase: 0.8,
+                quadrature: 0.0,
+            },
+            Demodulation {
+                in_phase: -0.4,
+                quadrature: 0.1,
+            },
+            Demodulation {
+                in_phase: 0.2,
+                quadrature: -0.3,
+            },
+            Demodulation {
+                in_phase: -0.1,
+                quadrature: 0.5,
+            },
+        ]],
+    };
+    let curves = MtsCurves::from_demodulated(raw, -0.25);
+    assert_eq!(curves.dc, [-0.1]);
+    assert_eq!(curves.proj1, [0.1]);
+    assert_eq!(curves.proj2, [-0.05]);
+    assert_eq!(curves.proj3, [0.025]);
 }
 
 fn small_params() -> Params {
@@ -219,11 +254,38 @@ fn harmonic_gradients_validate_the_difference_and_sampling() {
 
 #[test]
 fn adjacent_gradient_sums_use_signed_neighbours_and_double_dc() {
-    let values = normalised_adjacent_gradient_sums(&[2.0, 4.0, -3.0, 5.0, -7.0]).unwrap();
+    let gradients = [2.0, 4.0, -3.0, 5.0, -7.0];
+    let values = normalised_adjacent_gradient_sums(&gradients).unwrap();
     assert_eq!(values.len(), 3);
     assert_close(values[0], 1.0 / 16.0, 1e-15);
     assert_close(values[1], 81.0 / 16.0, 1e-15);
     assert_close(values[2], 25.0 / 4.0, 1e-15);
+
+    let scaled: Vec<_> = gradients.iter().map(|value| -0.37 * value).collect();
+    let scaled_values = normalised_adjacent_gradient_sums(&scaled).unwrap();
+    for (actual, expected) in scaled_values.into_iter().zip(values) {
+        assert_close(actual, expected, 1e-14);
+    }
+}
+
+#[test]
+fn transmission_response_uses_mean_dc_and_standard_harmonics() {
+    let output = LinearResponseOutput {
+        times: vec![0.0, std::f64::consts::PI, std::f64::consts::TAU],
+        delays: vec![0.0],
+        response: vec![vec![1.0], vec![-1.0], vec![1.0]],
+    };
+    let gain = -0.25;
+    let raw_dc = output.demodulate(0)[0].in_phase;
+    let raw_first = output.demodulate(1)[0].in_phase;
+    assert_eq!(
+        demodulated_transmission_response(&output, 0, gain),
+        [0.5 * gain * raw_dc]
+    );
+    assert_eq!(
+        demodulated_transmission_response(&output, 1, gain),
+        [gain * raw_first]
+    );
 }
 
 #[test]
@@ -409,9 +471,11 @@ fn default_velocity_scan_is_finite() {
     let average = velocity_average(&params).unwrap();
     assert_eq!(average.harmonics, SIGNAL_HARMONICS);
     assert_eq!(average.values.len(), params.experiment.scan_samples);
-    assert!(average
-        .values
-        .iter()
-        .flatten()
-        .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite()));
+    assert!(
+        average
+            .values
+            .iter()
+            .flatten()
+            .all(|value| value.in_phase.is_finite() && value.quadrature.is_finite())
+    );
 }

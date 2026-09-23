@@ -2,12 +2,12 @@ use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    compute_demod_harmonics, DrivenAtomParams, HamiltonianParams, MtsParams,
+    DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod_harmonics,
 };
 use myplotlib::{AppResult, AxisScale, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
-use crate::app::{common_control_groups, Params};
+use crate::app::{Params, common_control_groups};
 use crate::units::{angular_gradient_to_per_mhz, frequency_slider};
 
 pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
@@ -27,7 +27,7 @@ pub(super) fn controls(params: &mut Params) -> SliderGrid<'_> {
     let common = common_control_groups(
         &mut experiment.pump,
         &mut experiment.probe,
-        &mut experiment.cell.transition,
+        &mut experiment.cell,
         &mut experiment.probe_detuning,
         &mut experiment.modulation_frequency,
         &mut experiment.modulation_depth,

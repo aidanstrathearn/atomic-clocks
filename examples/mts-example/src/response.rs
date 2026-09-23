@@ -3,12 +3,12 @@ use std::f64::consts::PI;
 use atomic_clocks::maths::fourier_transform;
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    compute_linear_response, DrivenAtomParams, LinearResponseOutput, LinearResponseSolverParams,
+    DrivenAtomParams, LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
 };
 use myplotlib::{AppResult, Plotter, Slider, SliderGrid, SliderGroup};
 use rayon::prelude::*;
 
-use crate::app::{common_control_groups, Params};
+use crate::app::{Params, common_control_groups};
 use crate::units::to_mhz;
 
 const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
@@ -43,7 +43,7 @@ fn control_grid(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
     let common = common_control_groups(
         &mut experiment.pump,
         &mut experiment.probe,
-        &mut experiment.cell.transition,
+        &mut experiment.cell,
         &mut experiment.probe_detuning,
         &mut experiment.modulation_frequency,
         &mut experiment.modulation_depth,
@@ -165,18 +165,22 @@ fn response_output_for_model(
 
 pub(super) fn plot(params: &mut Params) -> AppResult {
     let mts = params.mts_params()?;
-    let output = response_output_for_model(params, &mts)?;
+    let gain = params.transmission_gain()?;
+    let mut output = response_output_for_model(params, &mts)?;
     // Select the nearest computed observation time, retaining t = T as a
     // distinct endpoint. Keep the slider aligned when resolution changes.
     let index = (params.response_time_fraction.clamp(0.0, 1.0) * mts.solver.steps_per_period as f64)
         .round() as usize;
     params.response_time_fraction = index as f64 / mts.solver.steps_per_period as f64;
+    for value in &mut output.response[index] {
+        *value *= gain;
+    }
 
     let mut plot = Plotter::new();
     plot.plot(&output.delays, &output.response[index])
-        .label("C(t, t - τ)");
+        .label("Transmission response");
     plot.xlabel("Delay τ (µs)");
-    plot.ylabel("C(t, t - τ): σy response to σz / 2");
+    plot.ylabel("Normalized transmission response to σz / 2");
     plot.xlim(
         0.0,
         params.response_delay_periods as f64 * mts.atom.hamiltonian.modulation.period(),
@@ -184,32 +188,29 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     Ok(plot)
 }
 
+pub(super) fn demodulated_transmission_response(
+    output: &LinearResponseOutput,
+    harmonic: usize,
+    gain: f64,
+) -> Vec<f64> {
+    let scale = if harmonic == 0 { 0.5 * gain } else { gain };
+    output
+        .demodulate(harmonic)
+        .into_iter()
+        .map(|value| scale * value.in_phase)
+        .collect()
+}
+
 pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
     let mts = params.mts_params()?;
     let output = response_output_for_model(params, &mts)?;
-    let dc: Vec<_> = output
-        .demodulate(0)
-        .iter()
-        .map(|value| value.in_phase)
-        .collect();
-    let harmonic: Vec<_> = output
-        .demodulate(1)
-        .iter()
-        .map(|value| value.in_phase)
-        .collect();
-    let second_harmonic: Vec<_> = output
-        .demodulate(2)
-        .iter()
-        .map(|value| value.in_phase)
-        .collect();
-    let third_harmonic: Vec<_> = output
-        .demodulate(3)
-        .iter()
-        .map(|value| value.in_phase)
-        .collect();
+    let gain = params.transmission_gain()?;
+    let dc = demodulated_transmission_response(&output, 0, gain);
+    let harmonic = demodulated_transmission_response(&output, 1, gain);
+    let second_harmonic = demodulated_transmission_response(&output, 2, gain);
+    let third_harmonic = demodulated_transmission_response(&output, 3, gain);
     let mut plot = Plotter::new();
-    plot.plot(&output.delays, &dc)
-        .label("DC (twice signed mean)");
+    plot.plot(&output.delays, &dc).label("Mean response");
     plot.plot(&output.delays, &harmonic)
         .label("First harmonic (in phase)");
     plot.plot(&output.delays, &second_harmonic)
@@ -217,7 +218,7 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
     plot.plot(&output.delays, &third_harmonic)
         .label("Third harmonic (in phase)");
     plot.xlabel("Delay τ (µs)");
-    plot.ylabel("Demodulated σy response to σz / 2");
+    plot.ylabel("Demodulated normalized transmission response to σz / 2");
     plot.xlim(
         0.0,
         params.response_delay_periods as f64 * mts.atom.hamiltonian.modulation.period(),
@@ -228,20 +229,17 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
 pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
     let mts = params.mts_params()?;
     let output = response_output_for_model(params, &mts)?;
+    let gain = params.transmission_gain()?;
     let atom = &mts.atom.hamiltonian;
     let step = atom.modulation.period() / mts.solver.steps_per_period as f64;
     let mut plot = Plotter::new();
     for (harmonic, label) in [
-        (0, "DC (twice signed mean)"),
+        (0, "Mean response"),
         (1, "First harmonic (in phase)"),
         (2, "Second harmonic (in phase)"),
         (3, "Third harmonic (in phase)"),
     ] {
-        let response: Vec<_> = output
-            .demodulate(harmonic)
-            .iter()
-            .map(|value| value.in_phase)
-            .collect();
+        let response = demodulated_transmission_response(&output, harmonic, gain);
         // Match the Ramsey example: transform the real kernel over delay,
         // retaining the helper's one-sided, undoubled amplitudes and dt scaling.
         let spectrum = fourier_transform(&response, step, output.delays[0], FREQUENCY_STEP);
@@ -259,7 +257,7 @@ pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
         plot.plot(&frequencies_mhz, &magnitude).label(label);
     }
     plot.xlabel("Frequency (MHz)");
-    plot.ylabel("Fourier magnitude of demodulated response");
+    plot.ylabel("Fourier magnitude of normalized transmission response");
     plot.xlim(0.0, to_mhz(PI / step));
     //plot.yscale(AxisScale::Log10);
     Ok(plot)

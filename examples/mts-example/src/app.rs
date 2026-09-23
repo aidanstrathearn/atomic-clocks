@@ -24,7 +24,7 @@ impl Default for Params {
         let transition = Transition {
             wavelength_nm: 556.0,
             // Reproduces the previous gamma_down = 1 rad / microsecond.
-            linewidth_hz: 1.0 / (TAU * time_scale.seconds_per_unit()),
+            linewidth_hz: 1.82e5 //1.0 / (TAU * time_scale.seconds_per_unit()),
         };
         let laser_for_rabi = |rabi_per_model_time: f64| {
             let mut laser = Laser {
@@ -43,10 +43,10 @@ impl Default for Params {
                 time_scale,
                 cell: VapourCell {
                     transition,
-                    density_per_m3: 0.0,
-                    length_m: 0.1,
+                    density_per_m3: 1.0e18,
+                    length_m: 0.02,
                 },
-                pump:  Laser {
+                pump: Laser {
                     power_milliwatts: 0.005,
                     waist_radius_mm: 1.0,
                     wavelength_nm: transition.wavelength_nm,
@@ -62,7 +62,7 @@ impl Default for Params {
                 pump_probe_offset: 0.0,
                 pure_dephasing_rate: 0.0,
                 scan_half_range: 5.0 / TAU,
-                scan_samples: 50,
+                scan_samples: 40,
             },
             solver: MtsSolverParams::default(),
             velocity: VelocityParams::default(),
@@ -77,6 +77,14 @@ impl Default for Params {
 impl Params {
     pub(super) fn mts_params(&self) -> Result<MtsParams, String> {
         self.experiment.to_mts_params(self.solver)
+    }
+
+    /// Gain from raw probe-frame sigma_y to normalized transmission change.
+    pub(super) fn transmission_gain(&self) -> Result<f64, String> {
+        Ok(-self
+            .experiment
+            .probe_readout()?
+            .optical_depth_per_coherence())
     }
 
     /// Returns the physical velocity distribution in coordinates centred on
@@ -105,12 +113,17 @@ impl Params {
 fn atom_control_groups<'a>(
     pump: &'a mut Laser,
     probe: &'a mut Laser,
-    transition: &'a mut Transition,
+    cell: &'a mut VapourCell,
     modulation_frequency: &'a mut f64,
     modulation_depth: &'a mut f64,
     pump_probe_offset: &'a mut f64,
     pure_dephasing_rate: &'a mut f64,
 ) -> [SliderGroup<'a>; 3] {
+    let VapourCell {
+        transition,
+        density_per_m3,
+        length_m,
+    } = cell;
     let pump_power = &mut pump.power_milliwatts;
     let probe_power = &mut probe.power_milliwatts;
     let pump_waist = &mut pump.waist_radius_mm;
@@ -151,6 +164,16 @@ fn atom_control_groups<'a>(
         },
     )
     .logarithmic(true);
+    let density = Slider::new("Density (m⁻³)", density_per_m3, 1.0e8..=1.0e20)
+        .logarithmic(true)
+        .custom_formatter(|value, _| format!("{value:.2e}"));
+    let length = Slider::from_get_set("Cell length (mm)", 1.0..=1_000.0, move |length_mm| {
+        if let Some(length_mm) = length_mm {
+            *length_m = length_mm * 1.0e-3;
+        }
+        *length_m * 1.0e3
+    })
+    .logarithmic(true);
 
     [
         SliderGroup::new(
@@ -162,7 +185,7 @@ fn atom_control_groups<'a>(
                     0.1 / TAU..=20.0 / TAU,
                 ),
                 Slider::new("Depth (MHz)", modulation_depth, 0.0..=20.0 / TAU),
-                Slider::new("Shift (MHz)", pump_probe_offset, -40.0 / TAU..=40.0 / TAU),
+                Slider::new("Shift (MHz)", pump_probe_offset, -600.0 / TAU..=600.0 / TAU),
             ],
         ),
         SliderGroup::new(
@@ -174,7 +197,7 @@ fn atom_control_groups<'a>(
             ],
         ),
         SliderGroup::new(
-            "Transition",
+            "Transition and cell",
             [
                 common_wavelength,
                 linewidth,
@@ -183,6 +206,8 @@ fn atom_control_groups<'a>(
                     pure_dephasing_rate,
                     0.0..=10.0 / TAU,
                 ),
+                density,
+                length,
             ],
         ),
     ]
@@ -191,7 +216,7 @@ fn atom_control_groups<'a>(
 pub(super) fn common_control_groups<'a>(
     pump: &'a mut Laser,
     probe: &'a mut Laser,
-    transition: &'a mut Transition,
+    cell: &'a mut VapourCell,
     probe_detuning: &'a mut f64,
     modulation_frequency: &'a mut f64,
     modulation_depth: &'a mut f64,
@@ -205,7 +230,7 @@ pub(super) fn common_control_groups<'a>(
     let [modulation, lasers, transition_controls] = atom_control_groups(
         pump,
         probe,
-        transition,
+        cell,
         modulation_frequency,
         modulation_depth,
         pump_probe_offset,
