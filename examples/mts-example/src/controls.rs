@@ -75,10 +75,10 @@ fn atom_control_groups<'a>(
         },
     )
     .logarithmic(true);
-    let density = Slider::new("Density (m⁻³)", density_per_m3, 1.0e8..=1.0e20)
+    let density = Slider::new("Density (m⁻³)", density_per_m3, 1.0e17..=1.0e20)
         .logarithmic(true)
         .custom_formatter(|value, _| format!("{value:.2e}"));
-    let length = Slider::from_get_set("Cell length (mm)", 1.0..=1_000.0, move |length_mm| {
+    let length = Slider::from_get_set("Cell length (mm)", 1.0..=100.0, move |length_mm| {
         if let Some(length_mm) = length_mm {
             *length_m = length_mm * 1.0e-3;
         }
@@ -96,14 +96,14 @@ fn atom_control_groups<'a>(
                     0.1 / TAU..=20.0 / TAU,
                 ),
                 Slider::new("Depth (MHz)", modulation_depth, 0.0..=20.0 / TAU),
-                Slider::new("Shift (MHz)", pump_probe_offset, -600.0 / TAU..=600.0 / TAU),
+                Slider::new("Shift (MHz)", pump_probe_offset, 0.0 / TAU..=600.0 / TAU),
             ],
         ),
         SliderGroup::new(
             "Lasers",
             [
-                Slider::new("Pump power (mW)", pump_power, 1e-6..=2.0).logarithmic(true),
-                Slider::new("Probe power (mW)", probe_power, 1e-6..=2.0).logarithmic(true),
+                Slider::new("Pump power (mW)", pump_power, 1e-6..=1.0).logarithmic(true),
+                Slider::new("Probe power (mW)", probe_power, 1e-6..=1.0).logarithmic(true),
                 common_waist,
             ],
         ),
@@ -129,8 +129,8 @@ fn velocity_control_group(params: &mut VelocityParams) -> SliderGroup<'_> {
         "Velocity distribution",
         [
             frequency_slider("Sigma", &mut params.sigma, 0.0..=3000.0).logarithmic(true),
-            frequency_slider("Integration window", &mut params.half_width, 0.1..=120.0),
-            Slider::new("Midpoint samples", &mut params.sample_count, 1..=1_001).step_by(2.0),
+            frequency_slider("Integration window", &mut params.half_width, 0.1..=200.0),
+            Slider::new("Midpoint samples", &mut params.sample_count, 1..=201).step_by(2.0),
         ],
     )
 }
@@ -169,8 +169,8 @@ fn common_control_groups(params: CommonControls<'_>) -> [SliderGroup<'_>; 5] {
         "Solver",
         [
             Slider::new("Spatial phase samples", kr_n, 1..=21).step_by(2.0),
-            Slider::new("Steps per period", steps_per_period, 20..=1_000),
-            Slider::from_get_set("Warmup periods", 0.0..=100.0, move |warmup| {
+            Slider::new("Steps per period", steps_per_period, 20..=500),
+            Slider::from_get_set("Warmup periods", 0.0..=10.0, move |warmup| {
                 if let Some(warmup) = warmup {
                     *n_periods = warmup.round() as usize + 1;
                 }
