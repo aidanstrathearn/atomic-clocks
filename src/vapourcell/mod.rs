@@ -5,7 +5,7 @@ mod mts;
 mod readout;
 mod velocity;
 
-pub use experiment::{Laser, ModelTimeScale, MtsExperiment, Transition, VapourCell};
+pub use experiment::{ModelTimeScale, MtsExperiment, VapourCell};
 pub use hamiltonian::{DrivenAtomParams, Frame, HamiltonianParams};
 pub use linear_response::{
     LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,

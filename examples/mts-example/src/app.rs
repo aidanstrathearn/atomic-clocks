@@ -1,8 +1,9 @@
 use std::f64::consts::TAU;
 
+use atomic_clocks::common::{Laser, Transition};
 use atomic_clocks::vapourcell::{
-    Frame, HamiltonianParams, Laser, LinearResponseSolverParams, ModelTimeScale, MtsExperiment,
-    MtsParams, MtsSolverParams, Transition, VapourCell, VelocityParams,
+    Frame, HamiltonianParams, LinearResponseSolverParams, ModelTimeScale, MtsExperiment, MtsParams,
+    MtsSolverParams, VapourCell, VelocityParams,
 };
 use myplotlib::{AppDefinition, Plotter, ViewOption};
 

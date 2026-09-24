@@ -1,6 +1,7 @@
 use std::f64::consts::TAU;
 
-use atomic_clocks::vapourcell::{Laser, MtsExperiment, MtsSolverParams, VapourCell};
+use atomic_clocks::common::Laser;
+use atomic_clocks::vapourcell::{MtsExperiment, MtsSolverParams, VapourCell};
 use myplotlib::{Slider, SliderGrid, SliderGroup};
 
 use crate::app::{Params, VelocityIntegrationParams};

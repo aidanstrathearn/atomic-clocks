@@ -211,7 +211,8 @@ impl ProbeReadout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vapourcell::{Laser, ModelTimeScale, MtsSolverParams, Transition, VapourCell};
+    use crate::common::{Laser, Transition};
+    use crate::vapourcell::{ModelTimeScale, MtsSolverParams, VapourCell};
 
     fn experiment() -> MtsExperiment {
         MtsExperiment {
