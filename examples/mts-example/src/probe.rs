@@ -7,7 +7,7 @@ use atomic_clocks::vapourcell::{
 use myplotlib::{AppResult, Plotter};
 use rayon::prelude::*;
 
-use crate::app::Params;
+use crate::app::{Params, add_rabi_summaries};
 use crate::units::to_mhz;
 
 pub(super) const DC_HARMONICS: [usize; 1] = [0];
@@ -80,6 +80,7 @@ fn new_signal_plot(params: &MtsParams) -> Plotter {
         to_mhz(display_detuning(params, -params.scan.hz_lim)),
         to_mhz(display_detuning(params, params.scan.hz_lim)),
     );
+    add_rabi_summaries(&mut plot, params);
     plot
 }
 

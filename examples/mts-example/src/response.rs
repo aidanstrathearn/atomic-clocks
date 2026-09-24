@@ -8,7 +8,7 @@ use atomic_clocks::vapourcell::{
 use myplotlib::{AppResult, Plotter};
 use rayon::prelude::*;
 
-use crate::app::Params;
+use crate::app::{Params, add_rabi_summaries};
 use crate::units::to_mhz;
 
 const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
@@ -143,6 +143,7 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
         0.0,
         params.response_delay_periods as f64 * mts.atom.hamiltonian.modulation.period(),
     );
+    add_rabi_summaries(&mut plot, &mts);
     Ok(plot)
 }
 
@@ -181,6 +182,7 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
         0.0,
         params.response_delay_periods as f64 * mts.atom.hamiltonian.modulation.period(),
     );
+    add_rabi_summaries(&mut plot, &mts);
     Ok(plot)
 }
 
@@ -218,5 +220,6 @@ pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
     plot.ylabel("Fourier magnitude of normalized transmission response");
     plot.xlim(0.0, to_mhz(PI / step));
     //plot.yscale(AxisScale::Log10);
+    add_rabi_summaries(&mut plot, &mts);
     Ok(plot)
 }

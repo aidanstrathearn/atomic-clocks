@@ -7,11 +7,15 @@ use atomic_clocks::vapourcell::{
 use myplotlib::{AppResult, AxisScale, Plotter};
 use rayon::prelude::*;
 
-use crate::app::Params;
+use crate::app::{Params, add_rabi_summaries};
 use crate::units::angular_gradient_to_per_mhz;
 
 pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
     let mts = params.mts_params()?;
+    harmonic_gradients_for_model(params, &mts)
+}
+
+fn harmonic_gradients_for_model(params: &Params, mts: &MtsParams) -> Result<Vec<f64>, String> {
     if !params.gradient_epsilon.is_finite() || params.gradient_epsilon <= 0.0 {
         return Err("finite-difference epsilon must be positive and finite".to_string());
     }
@@ -25,7 +29,7 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
         ));
     }
 
-    let samples = params.velocity_params(&mts)?.samples()?;
+    let samples = params.velocity_params(mts)?.samples()?;
     let harmonics: Vec<_> = (0..=params.gradient_harmonics).collect();
     let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
 
@@ -39,11 +43,11 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
                         atom: DrivenAtomParams {
                             hamiltonian: HamiltonianParams {
                                 delta: mts.atom.hamiltonian.delta + offset,
-                                ..params.probe_hamiltonian(&mts, sample.kv)
+                                ..params.probe_hamiltonian(mts, sample.kv)
                             },
                             ..mts.atom
                         },
-                        ..mts
+                        ..*mts
                     },
                     observable,
                     &harmonics,
@@ -68,7 +72,8 @@ pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
 }
 
 pub(super) fn plot(params: &mut Params) -> AppResult {
-    let magnitudes: Vec<_> = harmonic_gradients(params)?
+    let mts = params.mts_params()?;
+    let magnitudes: Vec<_> = harmonic_gradients_for_model(params, &mts)?
         .into_iter()
         .map(angular_gradient_to_per_mhz)
         .map(f64::abs)
@@ -83,6 +88,7 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     plot.ylabel("|d(in-phase signal) / dΔ| (per MHz)");
     plot.xlim(0.0, params.gradient_harmonics as f64 + 0.5);
     plot.yscale(AxisScale::Log10);
+    add_rabi_summaries(&mut plot, &mts);
     Ok(plot)
 }
 
@@ -116,7 +122,8 @@ pub(super) fn normalised_adjacent_gradient_sums(gradients: &[f64]) -> Result<Vec
 }
 
 pub(super) fn adjacent_plot(params: &mut Params) -> AppResult {
-    let values = normalised_adjacent_gradient_sums(&harmonic_gradients(params)?)?;
+    let mts = params.mts_params()?;
+    let values = normalised_adjacent_gradient_sums(&harmonic_gradients_for_model(params, &mts)?)?;
     let harmonics: Vec<_> = (1..params.gradient_harmonics)
         .map(|harmonic| harmonic as f64)
         .collect();
@@ -127,5 +134,6 @@ pub(super) fn adjacent_plot(params: &mut Params) -> AppResult {
     plot.xlabel("Harmonic number k");
     plot.yscale(AxisScale::Log10);
     //plot.ylim(0.5, params.gradient_harmonics as f64 - 0.5);
+    add_rabi_summaries(&mut plot, &mts);
     Ok(plot)
 }

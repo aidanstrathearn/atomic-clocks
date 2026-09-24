@@ -4,9 +4,9 @@ use atomic_clocks::vapourcell::{
     Frame, HamiltonianParams, Laser, LinearResponseSolverParams, ModelTimeScale, MtsExperiment,
     MtsParams, MtsSolverParams, Transition, VapourCell, VelocityParams,
 };
-use myplotlib::{AppDefinition, ViewOption};
+use myplotlib::{AppDefinition, Plotter, ViewOption};
 
-use crate::{controls, gradients, probe, response};
+use crate::{controls, gradients, probe, response, units::to_mhz};
 
 pub(crate) struct Params {
     pub(super) experiment: MtsExperiment,
@@ -143,6 +143,18 @@ impl Params {
             ..mts.atom.hamiltonian
         }
     }
+}
+
+pub(super) fn add_rabi_summaries(plot: &mut Plotter, mts: &MtsParams) {
+    let hamiltonian = &mts.atom.hamiltonian;
+    plot.add_summary(
+        "Pump Rabi frequency",
+        format!("{:.4} MHz", to_mhz(hamiltonian.r_pump)),
+    );
+    plot.add_summary(
+        "Probe Rabi frequency",
+        format!("{:.4} MHz", to_mhz(hamiltonian.r_prbe)),
+    );
 }
 
 pub(crate) fn definition() -> AppDefinition<Params> {
