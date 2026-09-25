@@ -1,5 +1,6 @@
 use atomic_clocks::twolevel::{
-    BlochVec, Channel, Decay, DissipativeStep, Hamiltonian, Liouvillian, Process, Vec3, steps,
+    BlochVec, Channel, Decay, DephasingLiouvillian, DephasingStep, DissipativeStep, Hamiltonian,
+    Liouvillian, Process, Vec3, steps,
 };
 
 fn state(x: f64, y: f64, z: f64) -> BlochVec {
@@ -146,5 +147,180 @@ fn different_dissipative_steps_compose_with_unitary_channels() {
             composed.apply_to(initial),
             Process::new(channels).propagate_to_final(initial),
         );
+    }
+}
+
+#[test]
+fn pure_dephasing_without_a_hamiltonian_damps_only_transverse_components() {
+    let initial = state(0.2, -0.3, 0.4);
+    for dt in [0.0, 0.2, 1.0, 5.0] {
+        let step = DephasingLiouvillian {
+            hamiltonian: Hamiltonian::default(),
+            gamma_phi: 0.7,
+        }
+        .for_duration(dt);
+        let transverse = (-0.7 * dt).exp();
+        let expected = state(
+            transverse * initial.r.x,
+            transverse * initial.r.y,
+            initial.r.z,
+        );
+        assert_state(step.apply_to(initial), expected);
+        assert_state(step.to_affine().apply_to(initial), expected);
+    }
+}
+
+#[test]
+fn longitudinal_hamiltonian_gives_damped_transverse_precession() {
+    let initial = state(0.2, -0.3, 0.4);
+    let h = 1.1;
+    let gamma_phi = 0.7;
+    for dt in [1e-4, 0.2, 1.0, 5.0] {
+        let step = DephasingLiouvillian {
+            hamiltonian: Hamiltonian::new(0.0, 0.0, h),
+            gamma_phi,
+        }
+        .for_duration(dt);
+        let (sin, cos) = (h * dt).sin_cos();
+        let transverse = (-gamma_phi * dt).exp();
+        let expected = state(
+            transverse * (initial.r.x * cos - initial.r.y * sin),
+            transverse * (initial.r.x * sin + initial.r.y * cos),
+            initial.r.z,
+        );
+        assert_state(step.apply_to(initial), expected);
+    }
+}
+
+#[test]
+fn pure_dephasing_handles_a_defective_repeated_eigenvalue() {
+    // For gamma_phi = 2 and H = sigma_x / 2, the yz block has a repeated
+    // eigenvalue -1 and is not diagonalisable.
+    let initial = state(0.2, -0.3, 0.4);
+    for dt in [1e-4, 0.2, 1.0, 5.0] {
+        let step = DephasingLiouvillian {
+            hamiltonian: Hamiltonian::new(1.0, 0.0, 0.0),
+            gamma_phi: 2.0,
+        }
+        .for_duration(dt);
+        let block_scale = (-dt).exp();
+        let expected = state(
+            (-2.0 * dt).exp() * initial.r.x,
+            block_scale * ((1.0 - dt) * initial.r.y - dt * initial.r.z),
+            block_scale * (dt * initial.r.y + (1.0 + dt) * initial.r.z),
+        );
+        assert_state(step.apply_to(initial), expected);
+    }
+}
+
+#[test]
+fn general_pure_dephasing_is_unital_composable_and_matches_its_affine_form() {
+    let hamiltonian = Hamiltonian::new(1.3, -0.4, 0.7);
+    let gamma_phi = 0.3;
+    let liouvillian = DephasingLiouvillian {
+        hamiltonian,
+        gamma_phi,
+    };
+    let first: DephasingStep = liouvillian.for_duration(0.3);
+    let second = liouvillian.for_duration(0.7);
+    let combined = liouvillian.for_duration(1.0);
+
+    assert_state(first.apply_to(state(0.0, 0.0, 0.0)), state(0.0, 0.0, 0.0));
+    for initial in initial_states() {
+        assert_state(
+            second.apply_to(first.apply_to(initial)),
+            combined.apply_to(initial),
+        );
+        assert_state(first.to_affine().apply_to(initial), first.apply_to(initial));
+    }
+
+    let r = Vec3 {
+        x: 0.2,
+        y: -0.3,
+        z: 0.4,
+    };
+    let o = Vec3 {
+        x: -0.5,
+        y: 0.7,
+        z: 0.1,
+    };
+    let forward = first.apply_traceless(r);
+    let backward = first.pull_back_traceless_observable(o);
+    assert!((o.dot(forward) - backward.dot(r)).abs() < 1e-14);
+}
+
+#[test]
+fn pure_dephasing_matches_the_nonsingular_dissipative_limit() {
+    let hamiltonian = Hamiltonian::new(1.3, -0.4, 0.7);
+    let gamma_phi = 0.3;
+    let dephasing = DephasingLiouvillian {
+        hamiltonian,
+        gamma_phi,
+    };
+    let dissipative = Liouvillian {
+        hamiltonian,
+        decay: Decay {
+            gamma_up: 0.0,
+            gamma_down: 0.0,
+            gamma_phi,
+        },
+    };
+    let traceless = Vec3 {
+        x: 0.2,
+        y: -0.3,
+        z: 0.4,
+    };
+    let observable = Vec3 {
+        x: -0.5,
+        y: 0.7,
+        z: 0.1,
+    };
+
+    for dt in [0.0, 1e-4, 0.2, 1.0, 5.0] {
+        let dephasing_step = dephasing.for_duration(dt);
+        let dissipative_step = dissipative.for_duration(dt);
+
+        for initial in initial_states() {
+            assert_state(
+                dephasing_step.apply_to(initial),
+                dissipative_step.apply_to(initial),
+            );
+            assert_state(
+                dephasing_step.to_affine().apply_to(initial),
+                dissipative_step.to_affine().apply_to(initial),
+            );
+        }
+        assert_state(
+            BlochVec {
+                r: dephasing_step.apply_traceless(traceless),
+            },
+            BlochVec {
+                r: dissipative_step.apply_traceless(traceless),
+            },
+        );
+        assert_state(
+            BlochVec {
+                r: dephasing_step.pull_back_traceless_observable(observable),
+            },
+            BlochVec {
+                r: dissipative_step.pull_back_traceless_observable(observable),
+            },
+        );
+    }
+}
+
+#[test]
+fn zero_dephasing_matches_unitary_evolution() {
+    let hamiltonian = Hamiltonian::new(0.4, -0.7, 1.1);
+    let liouvillian = DephasingLiouvillian {
+        hamiltonian,
+        gamma_phi: 0.0,
+    };
+    for dt in [0.0, 1e-4, 0.2, 1.0, 5.0] {
+        let actual = liouvillian.for_duration(dt);
+        let expected = hamiltonian.for_duration(dt);
+        for initial in initial_states() {
+            assert_state(actual.apply_to(initial), expected.apply_to(initial));
+        }
     }
 }

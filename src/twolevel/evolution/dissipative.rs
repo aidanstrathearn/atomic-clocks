@@ -138,6 +138,144 @@ impl Channel for DissipativeStep {
     }
 }
 
+/// Hamiltonian and pure-dephasing rate for a two-level system without
+/// population decay or excitation.
+#[derive(Copy, Clone)]
+pub struct DephasingLiouvillian {
+    pub hamiltonian: Hamiltonian,
+    pub gamma_phi: f64,
+}
+
+impl DephasingLiouvillian {
+    /// Prepare evolution under this constant generator for `dt`.
+    ///
+    /// The duration and dephasing rate must be finite and nonnegative.
+    pub fn for_duration(&self, dt: f64) -> DephasingStep {
+        assert!(
+            self.gamma_phi.is_finite() && self.gamma_phi >= 0.0,
+            "pure-dephasing rate must be nonnegative and finite"
+        );
+        assert!(
+            dt.is_finite() && dt >= 0.0,
+            "evolution duration must be nonnegative and finite"
+        );
+
+        let h = self.hamiltonian.r;
+        let gamma_phi = self.gamma_phi;
+        let generator = Mat3::from_rows([
+            [-gamma_phi, -h.z, h.y],
+            [h.z, -gamma_phi, -h.x],
+            [-h.y, h.x, 0.0],
+        ]);
+        let symmetric = (
+            2.0 * gamma_phi,
+            gamma_phi * gamma_phi + h.norm_square(),
+            gamma_phi * (h.x * h.x + h.y * h.y),
+        );
+        let eigs = cubic_roots(symmetric);
+        let coefficients = cayley_coeffs(symmetric, eigs, dt);
+
+        let linear = if cayley_result_is_well_conditioned(eigs, coefficients) {
+            let (c0, c1, c2) = coefficients;
+            c0 * Mat3::identity() + c1 * generator + c2 * (generator * generator)
+        } else {
+            matrix_exp(generator * dt)
+        };
+
+        DephasingStep { linear }
+    }
+}
+
+/// Prepared evolution over one interval of a constant
+/// [`DephasingLiouvillian`].
+///
+/// Unlike [`DissipativeStep`], this channel is unital: it has no population
+/// source or affine shift.
+#[derive(Copy, Clone)]
+pub struct DephasingStep {
+    linear: Mat3,
+}
+
+impl Channel for DephasingStep {
+    fn apply_to(&self, state: BlochVec) -> BlochVec {
+        BlochVec {
+            r: self.linear.apply_to_vec(state.r),
+        }
+    }
+
+    fn apply_traceless(&self, r: Vec3) -> Vec3 {
+        self.linear.apply_to_vec(r)
+    }
+
+    fn pull_back_traceless_observable(&self, o: Vec3) -> Vec3 {
+        self.linear.transpose().apply_to_vec(o)
+    }
+
+    fn to_affine(&self) -> AffineChannel {
+        AffineChannel::new(
+            self.linear,
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        )
+    }
+}
+
+fn cayley_result_is_well_conditioned(eigs: [Complex; 3], coefficients: (f64, f64, f64)) -> bool {
+    if ![coefficients.0, coefficients.1, coefficients.2]
+        .into_iter()
+        .all(f64::is_finite)
+    {
+        return false;
+    }
+
+    let scale = eigs
+        .iter()
+        .map(|value| value.re.hypot(value.im))
+        .fold(1.0_f64, f64::max);
+    let tolerance = 64.0 * f64::EPSILON.sqrt() * scale;
+    [(0, 1), (0, 2), (1, 2)]
+        .into_iter()
+        .all(|(i, j)| (eigs[i].re - eigs[j].re).hypot(eigs[i].im - eigs[j].im) > tolerance)
+}
+
+/// Scaling-and-squaring Taylor fallback for repeated or nearly repeated
+/// eigenvalues. This is isolated from the existing dissipative path.
+fn matrix_exp(matrix: Mat3) -> Mat3 {
+    let norm = matrix_infinity_norm(matrix);
+    let squarings = if norm > 0.5 {
+        (norm / 0.5).log2().ceil() as u32
+    } else {
+        0
+    };
+    let scaled = matrix * 2.0_f64.powi(-(squarings as i32));
+
+    let mut sum = Mat3::identity();
+    let mut term = Mat3::identity();
+    for order in 1..=64 {
+        term = (term * scaled) * (1.0 / order as f64);
+        sum = sum + term;
+        if matrix_infinity_norm(term) <= f64::EPSILON * matrix_infinity_norm(sum).max(1.0) {
+            break;
+        }
+    }
+
+    for _ in 0..squarings {
+        sum = sum * sum;
+    }
+    sum
+}
+
+fn matrix_infinity_norm(matrix: Mat3) -> f64 {
+    matrix
+        .rows()
+        .iter()
+        .map(|row| row.iter().map(|value| value.abs()).sum::<f64>())
+        .fold(0.0, f64::max)
+}
+
 fn get_cayley_coeffs(liouvillian: Liouvillian, t: f64) -> (f64, f64, f64) {
     let sym = symmetric_polynomials(liouvillian);
     let eigs = cubic_roots(sym);
