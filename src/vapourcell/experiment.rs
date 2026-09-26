@@ -177,11 +177,13 @@ mod tests {
                 power_milliwatts: 2.0,
                 waist_radius_mm: 0.8,
                 wavelength_nm: 780.25,
+                linewidth_fwhm_hz: 0.0,
             },
             probe: Laser {
                 power_milliwatts: 0.2,
                 waist_radius_mm: 0.6,
                 wavelength_nm: 780.23,
+                linewidth_fwhm_hz: 0.0,
             },
             probe_detuning: -1.2,
             modulation_frequency: 3.4,

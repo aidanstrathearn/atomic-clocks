@@ -82,11 +82,13 @@ impl Default for Params {
                     power_milliwatts: 0.02,
                     waist_radius_mm: 1.0,
                     wavelength_nm: transition.wavelength_nm,
+                    linewidth_fwhm_hz: 0.0,
                 },
                 probe: Laser {
                     power_milliwatts: 0.02,
                     waist_radius_mm: 1.0,
                     wavelength_nm: transition.wavelength_nm,
+                    linewidth_fwhm_hz: 0.0,
                 },
                 probe_detuning: 0.0,
                 modulation_frequency: 1.0 / TAU,

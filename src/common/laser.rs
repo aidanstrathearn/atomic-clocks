@@ -17,6 +17,8 @@ pub struct Laser {
     pub waist_radius_mm: f64,
     /// Used for photon energy, not to derive a laser detuning.
     pub wavelength_nm: f64,
+    /// Lorentzian optical power-spectrum FWHM in ordinary-frequency units.
+    pub linewidth_fwhm_hz: f64,
 }
 
 impl Laser {
@@ -46,6 +48,9 @@ impl Laser {
         }
         if !self.wavelength_nm.is_finite() || self.wavelength_nm <= 0.0 {
             return Err(format!("{name} wavelength must be positive and finite"));
+        }
+        if !self.linewidth_fwhm_hz.is_finite() || self.linewidth_fwhm_hz < 0.0 {
+            return Err(format!("{name} linewidth must be finite and nonnegative"));
         }
         Ok(())
     }
