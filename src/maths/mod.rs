@@ -7,7 +7,7 @@ pub use mat3::Mat3;
 
 use std::f64::consts::PI;
 
-use rustfft::{num_complex::Complex64, FftPlanner};
+use rustfft::{FftPlanner, num_complex::Complex64};
 
 #[derive(Clone)]
 pub struct FourierSpectrum {

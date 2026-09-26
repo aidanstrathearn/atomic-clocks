@@ -1,5 +1,5 @@
 use super::error::SpectrumError;
-use super::frequency::{interpolation_location, validate_lengths, AngularFrequencyGrid};
+use super::frequency::{AngularFrequencyGrid, interpolation_location, validate_lengths};
 use super::transfer::LtiFilter;
 
 /// Real samples of a one-sided PSD on a nonnegative angular-frequency grid.

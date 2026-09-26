@@ -2,7 +2,7 @@ use crate::maths::FourierSpectrum;
 use rustfft::num_complex::Complex64;
 
 use super::error::SpectrumError;
-use super::frequency::{interpolation_location, validate_lengths, AngularFrequencyGrid};
+use super::frequency::{AngularFrequencyGrid, interpolation_location, validate_lengths};
 
 /// Complex samples of an LTI transfer function on an angular-frequency grid.
 #[derive(Clone, Debug)]

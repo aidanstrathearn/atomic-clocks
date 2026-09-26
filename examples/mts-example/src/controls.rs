@@ -99,8 +99,12 @@ fn velocity_control_group(params: &mut VelocityIntegrationParams) -> SliderGroup
         [
             frequency_slider("Sigma", &mut params.sigma, 0.0..=3000.0).logarithmic(true),
             frequency_slider("Integration window", &mut params.half_width, 0.1..=200.0),
-            frequency_slider("Maximum velocity step", &mut params.max_step, 0.05 * TAU..=5.0 * TAU)
-                .logarithmic(true),
+            frequency_slider(
+                "Maximum velocity step",
+                &mut params.max_step,
+                0.05 * TAU..=5.0 * TAU,
+            )
+            .logarithmic(true),
         ],
     )
 }

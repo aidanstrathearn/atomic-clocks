@@ -47,7 +47,9 @@ impl ModulationParams {
         -self.depth * (self.frequency * t).sin() + self.shift
     }
 
-    pub fn period(&self) -> f64 {std::f64::consts::TAU / self.frequency}
+    pub fn period(&self) -> f64 {
+        std::f64::consts::TAU / self.frequency
+    }
 }
 
 /// Cosine and sine coefficients relative to the demodulation reference.
