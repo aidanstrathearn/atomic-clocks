@@ -19,6 +19,16 @@ impl BlochVec {
             },
         }
     }
+
+    pub fn excited() -> Self {
+        Self {
+            r: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        }
+    }
     pub fn excited_probability(&self) -> f64 {
         // The excited state lies at r.z = +1.
         0.5 * (1.0 + self.r.z)
