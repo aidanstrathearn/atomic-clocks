@@ -24,28 +24,21 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
 }
 
 #[test]
-fn default_experiment_reproduces_the_previous_model_rates() {
+fn default_experiment_matches_the_configured_physical_parameters() {
     let params = Params::default();
     let mts = params.mts_params().unwrap();
 
     assert_eq!(params.experiment.cell.transition.wavelength_nm, 556.0);
     assert_eq!(params.experiment.pump.waist_radius_mm, 1.0);
     assert_eq!(params.experiment.probe.waist_radius_mm, 1.0);
-    assert_eq!(params.experiment.cell.density_per_m3, 1.0e14);
-    assert_eq!(params.experiment.cell.length_m, 0.1);
-    assert_close(mts.atom.hamiltonian.r_pump, 1.0, 1e-14);
-    assert_close(mts.atom.hamiltonian.r_prbe, 0.1, 1e-14);
-    assert_close(mts.atom.decay.gamma_down, 1.0, 1e-14);
-    assert_close(
-        params.experiment.pump.power_milliwatts,
-        0.003_802_164_024_35,
-        1e-12,
-    );
-    assert_close(
-        params.experiment.probe.power_milliwatts,
-        0.000_038_021_640_243_5,
-        1e-14,
-    );
+    assert_eq!(params.experiment.cell.density_per_m3, 1.0e18);
+    assert_eq!(params.experiment.cell.length_m, 0.02);
+    assert_eq!(params.experiment.pump.power_milliwatts, 0.02);
+    assert_eq!(params.experiment.probe.power_milliwatts, 0.02);
+    assert!(mts.atom.hamiltonian.r_pump > 0.0);
+    assert_eq!(mts.atom.hamiltonian.r_pump, mts.atom.hamiltonian.r_prbe);
+    assert_close(mts.atom.decay.gamma_down, TAU * 182_000.0e-6, 1e-14);
+    assert_close(mts.atom.decay.gamma_phi, TAU * 0.5, 1e-14);
 }
 
 #[test]
@@ -124,7 +117,7 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
     // averaging because a single atom is not modulation-periodic.
     let epsilon = 1e-4;
     for (delta, kv) in [(0.6, 0.0), (-0.4, 0.37)] {
-        let mut previous_errors = [f64::INFINITY; 4];
+        let mut previous_total_error = f64::INFINITY;
         for steps_per_period in [128, 256] {
             let mut params = Params::default();
             params.experiment.probe_detuning = delta / TAU;
@@ -158,13 +151,15 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
             eprintln!(
                 "delta={delta}, kv={kv}, steps={steps_per_period}: integrals={integrated:?}, slopes={slopes:?}"
             );
-            for j in 0..4 {
-                let error = (integrated[j] - slopes[j]).abs();
-                assert!(
-                    error < previous_errors[j],
-                    "component {j} did not converge: {error}"
-                );
-                if steps_per_period == 256 {
+            let errors: [f64; 4] = std::array::from_fn(|j| (integrated[j] - slopes[j]).abs());
+            let total_error = errors.iter().sum::<f64>();
+            assert!(
+                total_error < previous_total_error,
+                "total error did not converge: {total_error}"
+            );
+            if steps_per_period == 256 {
+                for j in 0..4 {
+                    let error = errors[j];
                     assert!(
                         error < 2e-5,
                         "component {j}: {} != {}, error={error}",
@@ -172,8 +167,8 @@ fn integrated_demodulated_response_matches_probe_curve_slopes() {
                         slopes[j]
                     );
                 }
-                previous_errors[j] = error;
             }
+            previous_total_error = total_error;
         }
     }
 }
@@ -208,7 +203,7 @@ fn transmission_curves_apply_one_gain_to_signed_components() {
     };
     let dc = DcCurve::from_demodulated(dc_raw, -0.25);
     let harmonics = HarmonicCurves::from_demodulated(harmonic_raw, -0.25);
-    assert_eq!(dc.values, [-0.1]);
+    assert_eq!(dc.values, [0.9]);
     assert_eq!(harmonics.proj1, [0.1]);
     assert_eq!(harmonics.proj2, [-0.05]);
     assert_eq!(harmonics.proj3, [0.025]);

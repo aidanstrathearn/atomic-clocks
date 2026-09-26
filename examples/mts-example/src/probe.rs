@@ -21,7 +21,7 @@ pub(super) struct DcCurve {
 }
 
 impl DcCurve {
-    /// Builds mean transmission minus one with `gain = -F`.
+    /// Builds mean normalized transmission with `gain = -F`.
     pub(super) fn from_demodulated(output: DcOutput, gain: f64) -> Self {
         let DemodOutput {
             hz,
