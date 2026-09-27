@@ -6,9 +6,9 @@ use atomic_clocks::vapourcell::{
     DrivenAtomParams, LinearResponseOutput, LinearResponseSolverParams, compute_linear_response,
 };
 use myplotlib::{AppResult, Plotter};
-use rayon::prelude::*;
 
 use crate::app::{Params, add_rabi_summaries};
+use crate::parallel::try_fold_chunks_ordered;
 use crate::units::to_mhz;
 
 const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
@@ -85,39 +85,28 @@ fn response_output_for_model(
 ) -> Result<LinearResponseOutput, String> {
     let samples = params.velocity_params(mts)?.samples()?;
 
-    // Bound retained matrices by the selected concurrency, and retain a fixed
-    // sample/chunk order so floating-point sums do not depend on scheduling.
-    let chunk_size = params.compute_chunk_size(samples.len());
-    let partials: Result<Vec<_>, String> = samples
-        .par_chunks(chunk_size)
-        .map(|chunk| {
-            let mut chunk = chunk.iter().copied();
-            let first = chunk.next().expect("velocity chunks are non-empty");
-            let mut sum = response_at_velocity_for_model(params, mts, first.kv)?;
-            for row in &mut sum.response {
+    try_fold_chunks_ordered(
+        &samples,
+        params.compute_threads,
+        |sample| {
+            let mut output = response_at_velocity_for_model(params, mts, sample.kv)?;
+            for row in &mut output.response {
                 for value in row {
-                    *value *= first.weight;
+                    *value *= sample.weight;
                 }
             }
-            for sample in chunk {
-                add_response(
-                    &mut sum,
-                    response_at_velocity_for_model(params, mts, sample.kv)?,
-                    sample.weight,
-                )?;
-            }
-            Ok(sum)
-        })
-        .collect();
-
-    let mut partials = partials?.into_iter();
-    let mut sum = partials
-        .next()
-        .expect("a positive velocity sample count produces a response");
-    for partial in partials {
-        add_response(&mut sum, partial, 1.0)?;
-    }
-    Ok(sum)
+            Ok(output)
+        },
+        |sum, sample| {
+            add_response(
+                sum,
+                response_at_velocity_for_model(params, mts, sample.kv)?,
+                sample.weight,
+            )
+        },
+        |sum, partial| add_response(sum, partial, 1.0),
+    )?
+    .ok_or_else(|| "velocity sample count must be positive".to_string())
 }
 
 pub(super) fn plot(params: &mut Params) -> AppResult {

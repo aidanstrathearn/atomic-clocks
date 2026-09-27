@@ -5,9 +5,9 @@ use atomic_clocks::vapourcell::{
     DemodOutput, DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod,
 };
 use myplotlib::{AppResult, Plotter};
-use rayon::prelude::*;
 
 use crate::app::{Params, add_rabi_summaries};
+use crate::parallel::try_fold_chunks_ordered;
 use crate::units::to_mhz;
 
 pub(super) const DC_HARMONICS: [usize; 1] = [0];
@@ -186,30 +186,18 @@ fn velocity_average_for_model<const N: usize>(
         )
     };
 
-    // Bound retained outputs by the selected concurrency, and retain a fixed
-    // sample/chunk order so floating-point sums do not depend on scheduling.
-    let partials: Result<Vec<_>, String> = samples
-        .par_chunks(params.compute_chunk_size(samples.len()))
-        .map(|chunk| {
-            let mut chunk = chunk.iter().copied();
-            let first = chunk.next().expect("velocity chunks are non-empty");
-            let mut sum = compute_sample(first.kv)?;
-            scale_demod_output(&mut sum, first.weight);
-            for sample in chunk {
-                add_demod_output(&mut sum, compute_sample(sample.kv)?, sample.weight)?;
-            }
-            Ok(sum)
-        })
-        .collect();
-
-    let mut partials = partials?.into_iter();
-    let mut average = partials
-        .next()
-        .expect("a positive velocity sample count produces a signal");
-    for partial in partials {
-        add_demod_output(&mut average, partial, 1.0)?;
-    }
-    Ok(average)
+    try_fold_chunks_ordered(
+        &samples,
+        params.compute_threads,
+        |sample| {
+            let mut output = compute_sample(sample.kv)?;
+            scale_demod_output(&mut output, sample.weight);
+            Ok(output)
+        },
+        |sum, sample| add_demod_output(sum, compute_sample(sample.kv)?, sample.weight),
+        |sum, partial| add_demod_output(sum, partial, 1.0),
+    )?
+    .ok_or_else(|| "velocity sample count must be positive".to_string())
 }
 
 pub(super) fn dc_plot(params: &mut Params) -> AppResult {

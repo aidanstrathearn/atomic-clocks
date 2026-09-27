@@ -111,14 +111,6 @@ impl Default for Params {
 }
 
 impl Params {
-    pub(super) fn compute_chunk_size(&self, item_count: usize) -> usize {
-        let chunk_count = self
-            .compute_threads
-            .clamp(1, rayon::current_num_threads())
-            .min(item_count);
-        item_count.div_ceil(chunk_count)
-    }
-
     pub(super) fn mts_params(&self) -> Result<MtsParams, String> {
         self.experiment.to_mts_params(self.solver)
     }

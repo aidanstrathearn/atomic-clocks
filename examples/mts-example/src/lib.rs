@@ -1,6 +1,7 @@
 mod app;
 mod controls;
 mod gradients;
+mod parallel;
 mod probe;
 mod response;
 #[cfg(test)]
