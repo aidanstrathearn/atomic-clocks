@@ -33,40 +33,48 @@ fn harmonic_gradients_for_model(params: &Params, mts: &MtsParams) -> Result<Vec<
     let harmonics: Vec<_> = (0..=params.gradient_harmonics).collect();
     let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
 
-    // Collect in sample order so the weighted sum is independent of Rayon scheduling.
-    let outputs: Result<Vec<_>, String> = samples
-        .into_par_iter()
-        .map(|sample| {
-            let at_offset = |offset| {
-                compute_demod_harmonics(
-                    &MtsParams {
-                        atom: DrivenAtomParams {
-                            hamiltonian: HamiltonianParams {
-                                delta: mts.atom.hamiltonian.delta + offset,
-                                ..params.probe_hamiltonian(mts, sample.kv)
+    // Bound retained outputs by the selected concurrency, and retain a fixed
+    // sample/chunk order so floating-point sums do not depend on scheduling.
+    let partials: Result<Vec<_>, String> = samples
+        .par_chunks(params.compute_chunk_size(samples.len()))
+        .map(|chunk| {
+            let mut gradients = vec![0.0; harmonics.len()];
+            for sample in chunk {
+                let at_offset = |offset| {
+                    compute_demod_harmonics(
+                        &MtsParams {
+                            atom: DrivenAtomParams {
+                                hamiltonian: HamiltonianParams {
+                                    delta: mts.atom.hamiltonian.delta + offset,
+                                    ..params.probe_hamiltonian(mts, sample.kv)
+                                },
+                                ..mts.atom
                             },
-                            ..mts.atom
+                            ..*mts
                         },
-                        ..*mts
-                    },
-                    observable,
-                    &harmonics,
-                )
-            };
-            Ok((
-                sample.weight,
-                at_offset(-params.gradient_epsilon)?,
-                at_offset(params.gradient_epsilon)?,
-            ))
+                        observable,
+                        &harmonics,
+                    )
+                };
+                let below = at_offset(-params.gradient_epsilon)?;
+                let above = at_offset(params.gradient_epsilon)?;
+                for ((gradient, below), above) in gradients.iter_mut().zip(below).zip(above) {
+                    *gradient += sample.weight * (above.in_phase - below.in_phase);
+                }
+            }
+            Ok(gradients)
         })
         .collect();
 
-    let scale = 1.0 / (2.0 * params.gradient_epsilon);
     let mut gradients = vec![0.0; harmonics.len()];
-    for (weight, below, above) in outputs? {
-        for ((gradient, below), above) in gradients.iter_mut().zip(below).zip(above) {
-            *gradient += weight * (above.in_phase - below.in_phase) * scale;
+    for partial in partials? {
+        for (gradient, partial) in gradients.iter_mut().zip(partial) {
+            *gradient += partial;
         }
+    }
+    let scale = 1.0 / (2.0 * params.gradient_epsilon);
+    for gradient in &mut gradients {
+        *gradient *= scale;
     }
     Ok(gradients)
 }

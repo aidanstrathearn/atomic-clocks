@@ -227,8 +227,7 @@ fn small_params() -> Params {
 
 #[test]
 fn weighted_signal_matches_serial_signed_coefficients() {
-    let params = small_params();
-    let average = velocity_average(&params, TEST_HARMONICS).unwrap();
+    let mut params = small_params();
     let mts = params.mts_params().unwrap();
     let samples = params.velocity_params(&mts).unwrap().samples().unwrap();
     let reference: Vec<_> = samples
@@ -241,20 +240,31 @@ fn weighted_signal_matches_serial_signed_coefficients() {
         })
         .collect();
 
-    assert_eq!(average.hz, reference[0].1.hz);
-    assert_eq!(average.harmonics, TEST_HARMONICS);
-    for index in 0..average.hz.len() {
-        for harmonic_index in 0..TEST_HARMONICS.len() {
-            let expected = reference
-                .iter()
-                .map(|(weight, output)| {
-                    let value = output.values[index][harmonic_index];
-                    (weight * value.in_phase, weight * value.quadrature)
-                })
-                .fold((0.0, 0.0), |sum, value| (sum.0 + value.0, sum.1 + value.1));
-            let actual = average.values[index][harmonic_index];
-            assert_close(actual.in_phase, expected.0, 1e-12);
-            assert_close(actual.quadrature, expected.1, 1e-12);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build()
+        .unwrap();
+    for compute_threads in [1, 3] {
+        params.compute_threads = compute_threads;
+        let average = pool
+            .install(|| velocity_average(&params, TEST_HARMONICS))
+            .unwrap();
+
+        assert_eq!(average.hz, reference[0].1.hz);
+        assert_eq!(average.harmonics, TEST_HARMONICS);
+        for index in 0..average.hz.len() {
+            for harmonic_index in 0..TEST_HARMONICS.len() {
+                let expected = reference
+                    .iter()
+                    .map(|(weight, output)| {
+                        let value = output.values[index][harmonic_index];
+                        (weight * value.in_phase, weight * value.quadrature)
+                    })
+                    .fold((0.0, 0.0), |sum, value| (sum.0 + value.0, sum.1 + value.1));
+                let actual = average.values[index][harmonic_index];
+                assert_close(actual.in_phase, expected.0, 1e-12);
+                assert_close(actual.quadrature, expected.1, 1e-12);
+            }
         }
     }
 }
@@ -267,14 +277,23 @@ fn harmonic_gradients_match_the_plotted_in_phase_signal_slopes() {
     params.experiment.scan_samples = 2;
     params.gradient_epsilon = epsilon;
     params.gradient_harmonics = 3;
-    let gradients = harmonic_gradients(&params).unwrap();
-    let signal = velocity_average(&params, MODULATION_HARMONICS).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build()
+        .unwrap();
+    for compute_threads in [1, 3] {
+        params.compute_threads = compute_threads;
+        let gradients = pool.install(|| harmonic_gradients(&params)).unwrap();
+        let signal = pool
+            .install(|| velocity_average(&params, MODULATION_HARMONICS))
+            .unwrap();
 
-    for (actual, harmonic_index) in gradients.into_iter().skip(1).zip(0..3) {
-        let expected = (signal.values[1][harmonic_index].in_phase
-            - signal.values[0][harmonic_index].in_phase)
-            / (2.0 * epsilon);
-        assert_close(actual, expected, 1e-12);
+        for (actual, harmonic_index) in gradients.into_iter().skip(1).zip(0..3) {
+            let expected = (signal.values[1][harmonic_index].in_phase
+                - signal.values[0][harmonic_index].in_phase)
+                / (2.0 * epsilon);
+            assert_close(actual, expected, 1e-12);
+        }
     }
 }
 
@@ -343,11 +362,10 @@ fn adjacent_gradient_sums_require_two_harmonics_and_nonzero_normalisation() {
 
 #[test]
 fn weighted_response_matches_serial_kernels() {
-    let params = Params {
+    let mut params = Params {
         response_delay_periods: 1,
         ..small_params()
     };
-    let sum = response_output(&params).unwrap();
     let mts = params.mts_params().unwrap();
     let samples = params.velocity_params(&mts).unwrap().samples().unwrap();
     let reference: Vec<_> = samples
@@ -360,15 +378,24 @@ fn weighted_response_matches_serial_kernels() {
         })
         .collect();
 
-    assert_eq!(sum.times, reference[0].1.times);
-    assert_eq!(sum.delays, reference[0].1.delays);
-    for (i, row) in sum.response.iter().enumerate() {
-        for (j, &value) in row.iter().enumerate() {
-            let expected = reference
-                .iter()
-                .map(|(weight, output)| weight * output.response[i][j])
-                .sum::<f64>();
-            assert_close(value, expected, 1e-12);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build()
+        .unwrap();
+    for compute_threads in [1, 3] {
+        params.compute_threads = compute_threads;
+        let sum = pool.install(|| response_output(&params)).unwrap();
+
+        assert_eq!(sum.times, reference[0].1.times);
+        assert_eq!(sum.delays, reference[0].1.delays);
+        for (i, row) in sum.response.iter().enumerate() {
+            for (j, &value) in row.iter().enumerate() {
+                let expected = reference
+                    .iter()
+                    .map(|(weight, output)| weight * output.response[i][j])
+                    .sum::<f64>();
+                assert_close(value, expected, 1e-12);
+            }
         }
     }
 }

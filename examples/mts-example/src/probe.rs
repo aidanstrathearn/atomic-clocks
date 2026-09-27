@@ -169,33 +169,45 @@ fn velocity_average_for_model<const N: usize>(
         ..*mts
     };
 
-    // Collect in sample order so summation is independent of Rayon scheduling.
-    let outputs: Result<Vec<_>, String> = samples
-        .into_par_iter()
-        .map(|sample| {
-            compute_demod(
-                &MtsParams {
-                    atom: DrivenAtomParams {
-                        hamiltonian: HamiltonianParams {
-                            kv: sample.kv,
-                            ..probe.atom.hamiltonian
-                        },
-                        ..probe.atom
+    let compute_sample = |kv| {
+        compute_demod(
+            &MtsParams {
+                atom: DrivenAtomParams {
+                    hamiltonian: HamiltonianParams {
+                        kv,
+                        ..probe.atom.hamiltonian
                     },
-                    ..probe
+                    ..probe.atom
                 },
-                Vec3::from_angles(FRAC_PI_2, FRAC_PI_2),
-                harmonics,
-            )
-            .map(|output| (sample.weight, output))
+                ..probe
+            },
+            Vec3::from_angles(FRAC_PI_2, FRAC_PI_2),
+            harmonics,
+        )
+    };
+
+    // Bound retained outputs by the selected concurrency, and retain a fixed
+    // sample/chunk order so floating-point sums do not depend on scheduling.
+    let partials: Result<Vec<_>, String> = samples
+        .par_chunks(params.compute_chunk_size(samples.len()))
+        .map(|chunk| {
+            let mut chunk = chunk.iter().copied();
+            let first = chunk.next().expect("velocity chunks are non-empty");
+            let mut sum = compute_sample(first.kv)?;
+            scale_demod_output(&mut sum, first.weight);
+            for sample in chunk {
+                add_demod_output(&mut sum, compute_sample(sample.kv)?, sample.weight)?;
+            }
+            Ok(sum)
         })
         .collect();
 
-    let mut outputs = outputs?.into_iter();
-    let (weight, mut average) = outputs.next().expect("velocity sample count is positive");
-    scale_demod_output(&mut average, weight);
-    for (weight, output) in outputs {
-        add_demod_output(&mut average, output, weight)?;
+    let mut partials = partials?.into_iter();
+    let mut average = partials
+        .next()
+        .expect("a positive velocity sample count produces a signal");
+    for partial in partials {
+        add_demod_output(&mut average, partial, 1.0)?;
     }
     Ok(average)
 }

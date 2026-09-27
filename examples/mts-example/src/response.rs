@@ -87,11 +87,7 @@ fn response_output_for_model(
 
     // Bound retained matrices by the selected concurrency, and retain a fixed
     // sample/chunk order so floating-point sums do not depend on scheduling.
-    let chunk_count = params
-        .response_threads
-        .clamp(1, rayon::current_num_threads())
-        .min(samples.len());
-    let chunk_size = samples.len().div_ceil(chunk_count);
+    let chunk_size = params.compute_chunk_size(samples.len());
     let partials: Result<Vec<_>, String> = samples
         .par_chunks(chunk_size)
         .map(|chunk| {
