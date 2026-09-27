@@ -221,6 +221,8 @@ pub(super) fn demodulated_response(params: &mut Params) -> SliderGrid<'_> {
 
 fn response_controls(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
     let time_step = 1.0 / params.solver.steps_per_period as f64;
+    let max_threads = rayon::current_num_threads();
+    params.response_threads = params.response_threads.clamp(1, max_threads);
     let time_slider = show_time.then(|| {
         Slider::new(
             "Observation time (t / T)",
@@ -237,12 +239,20 @@ fn response_controls(params: &mut Params, show_time: bool) -> SliderGrid<'_> {
             1..=20,
         )]),
     );
+    let compute = SliderGroup::new(
+        "Compute",
+        [Slider::new(
+            "Threads",
+            &mut params.response_threads,
+            1..=max_threads,
+        )],
+    );
     let common = common_control_groups(common_controls(
         &mut params.experiment,
         &mut params.solver,
         &mut params.velocity,
     ));
-    SliderGrid::new(6, common.into_iter().chain([response]))
+    SliderGrid::new(6, common.into_iter().chain([response, compute]))
 }
 
 pub(super) fn gradients(params: &mut Params) -> SliderGrid<'_> {

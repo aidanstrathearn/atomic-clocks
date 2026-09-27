@@ -17,6 +17,7 @@ pub(crate) struct Params {
     pub(super) gradient_harmonics: usize,
     pub(super) response_time_fraction: f64,
     pub(super) response_delay_periods: usize,
+    pub(super) response_threads: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -104,6 +105,7 @@ impl Default for Params {
             gradient_harmonics: 10,
             response_time_fraction: 0.0,
             response_delay_periods: LinearResponseSolverParams::default().delay_periods,
+            response_threads: rayon::current_num_threads(),
         }
     }
 }

@@ -85,9 +85,12 @@ fn response_output_for_model(
 ) -> Result<LinearResponseOutput, String> {
     let samples = params.velocity_params(mts)?.samples()?;
 
-    // Bound retained matrices by the worker count, and retain a fixed sample/chunk
-    // order so floating-point sums do not depend on scheduling.
-    let chunk_count = rayon::current_num_threads().min(samples.len());
+    // Bound retained matrices by the selected concurrency, and retain a fixed
+    // sample/chunk order so floating-point sums do not depend on scheduling.
+    let chunk_count = params
+        .response_threads
+        .clamp(1, rayon::current_num_threads())
+        .min(samples.len());
     let chunk_size = samples.len().div_ceil(chunk_count);
     let partials: Result<Vec<_>, String> = samples
         .par_chunks(chunk_size)
