@@ -27,5 +27,5 @@ harness = false
 name = "mts_ab"
 harness = false
 
-[patch."https://github.com/aidanstrathearn/myplotlib.git"]
-myplotlib = { path = "../myplotlib" }
+#[patch."https://github.com/aidanstrathearn/myplotlib.git"]
+#myplotlib = { path = "../myplotlib" }
