@@ -74,7 +74,7 @@ pub const YB171_CLOCK: TwoLevelAtom = TwoLevelAtom {
     mass_u: 170.936_331_52,
     transition: Transition {
         wavelength_nm: 578.0,
-        linewidth_hz: 0.010,
+        linewidth_hz: 0.007,
     },
 };
 
