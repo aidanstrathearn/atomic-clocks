@@ -8,25 +8,6 @@ pub enum Frame {
     Probe,
 }
 
-impl Frame {
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "atom" => Ok(Self::Atom),
-            "pump" => Ok(Self::Pump),
-            "probe" => Ok(Self::Probe),
-            _ => Err(format!("unknown frame '{value}'")),
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Atom => "atom",
-            Self::Pump => "pump",
-            Self::Probe => "probe",
-        }
-    }
-}
-
 /// Hamiltonian parameters for a single atom in the chosen rotating frame.
 #[derive(Clone, Copy, Debug)]
 pub struct HamiltonianParams {
