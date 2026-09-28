@@ -48,8 +48,6 @@ impl Default for HamiltonianParams {
     }
 }
 
-
-
 impl TimeDependentHamiltonian for HamiltonianParams {
     fn h(&self, t: f64) -> Hamiltonian {
         let phase = self.modulation.phase(t);
@@ -57,23 +55,18 @@ impl TimeDependentHamiltonian for HamiltonianParams {
         let kvt = t * self.kv;
 
         let (hz, pump_phase, probe_phase) = match self.frame {
-            Frame::Atom => (self.delta, kvt + phase + self.kr, -kvt - self.kr),
-            Frame::Pump => (
-                self.delta - self.kv - freq,
-                0.0,
-                -2.0 * kvt - phase - 2.0 * self.kr,
-            ),
-            Frame::Probe => (self.delta + self.kv, 2.0 * kvt + phase + 2.0 * self.kr, 0.0),
+            Frame::Atom => (0.0, kvt + phase + self.kr, -kvt - self.kr),
+            Frame::Pump => (-self.kv - freq, 0.0, -2.0 * kvt - phase - 2.0 * self.kr),
+            Frame::Probe => (self.kv, 2.0 * kvt + phase + 2.0 * self.kr, 0.0),
         };
 
         Hamiltonian::new(
             self.r_pump * pump_phase.cos() + self.r_prbe * probe_phase.cos(),
             self.r_pump * pump_phase.sin() + self.r_prbe * probe_phase.sin(),
-            hz,
+            hz + self.delta,
         )
     }
 }
-
 
 /// Time-dependent Hamiltonian and fixed dissipative rates for one driven atom.
 #[derive(Clone, Copy, Debug)]
@@ -96,5 +89,3 @@ impl DrivenAtomParams {
         }
     }
 }
-
-
