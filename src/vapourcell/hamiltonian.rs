@@ -20,20 +20,6 @@ pub struct HamiltonianParams {
     pub frame: Frame,
 }
 
-impl Default for HamiltonianParams {
-    fn default() -> Self {
-        Self {
-            modulation: ModulationParams::default(),
-            delta: 0.0,
-            r_pump: 1.0,
-            r_prbe: 0.1,
-            kv: 0.0,
-            kr: 0.0,
-            frame: Frame::Probe,
-        }
-    }
-}
-
 impl HamiltonianParams {
     /// Checks for a positive, finite modulation frequency and finite coefficients.
     pub fn validate(&self) -> Result<(), String> {
@@ -48,27 +34,21 @@ impl HamiltonianParams {
     }
 }
 
-/// Time-dependent Hamiltonian and fixed dissipative rates for one driven atom.
-#[derive(Clone, Copy, Debug)]
-pub struct DrivenAtomParams {
-    pub hamiltonian: HamiltonianParams,
-    pub decay: Decay,
-}
-
-impl DrivenAtomParams {
-    pub fn validate(&self) -> Result<(), String> {
-        self.hamiltonian.validate()?;
-        self.decay.validate()
-    }
-
-    /// Returns the instantaneous Liouvillian at model time `t`.
-    pub fn liouvillian_at(&self, t: f64) -> Liouvillian {
-        Liouvillian {
-            hamiltonian: self.hamiltonian.h(t),
-            decay: self.decay,
+impl Default for HamiltonianParams {
+    fn default() -> Self {
+        Self {
+            modulation: ModulationParams::default(),
+            delta: 0.0,
+            r_pump: 1.0,
+            r_prbe: 0.1,
+            kv: 0.0,
+            kr: 0.0,
+            frame: Frame::Probe,
         }
     }
 }
+
+
 
 impl TimeDependentHamiltonian for HamiltonianParams {
     fn h(&self, t: f64) -> Hamiltonian {
@@ -93,3 +73,28 @@ impl TimeDependentHamiltonian for HamiltonianParams {
         )
     }
 }
+
+
+/// Time-dependent Hamiltonian and fixed dissipative rates for one driven atom.
+#[derive(Clone, Copy, Debug)]
+pub struct DrivenAtomParams {
+    pub hamiltonian: HamiltonianParams,
+    pub decay: Decay,
+}
+
+impl DrivenAtomParams {
+    pub fn validate(&self) -> Result<(), String> {
+        self.hamiltonian.validate()?;
+        self.decay.validate()
+    }
+
+    /// Returns the instantaneous Liouvillian at model time `t`.
+    pub fn liouvillian_at(&self, t: f64) -> Liouvillian {
+        Liouvillian {
+            hamiltonian: self.hamiltonian.h(t),
+            decay: self.decay,
+        }
+    }
+}
+
+
