@@ -2,13 +2,31 @@ use std::f64::consts::FRAC_PI_2;
 
 use atomic_clocks::twolevel::Vec3;
 use atomic_clocks::vapourcell::{
-    DrivenAtomParams, HamiltonianParams, MtsParams, VelocitySample, compute_demod_harmonics,
+    DrivenAtomParams, HamiltonianParams, MtsParams, compute_demod_harmonics,
 };
 use myplotlib::{AppResult, AxisScale, Plotter};
 
 use crate::app::{Params, add_rabi_summaries};
-use crate::parallel::try_fold_chunks_ordered;
+use crate::parallel::{WeightedOutput, try_average_velocity_samples};
 use crate::units::angular_gradient_to_per_mhz;
+
+impl WeightedOutput for Vec<f64> {
+    fn scale(&mut self, weight: f64) {
+        for value in self {
+            *value *= weight;
+        }
+    }
+
+    fn try_add_scaled(&mut self, output: Self, weight: f64) -> Result<(), String> {
+        if self.len() != output.len() {
+            return Err("velocity gradient dimensions do not match".to_string());
+        }
+        for (sum, value) in self.iter_mut().zip(output) {
+            *sum += weight * value;
+        }
+        Ok(())
+    }
+}
 
 pub(super) fn harmonic_gradients(params: &Params) -> Result<Vec<f64>, String> {
     let mts = params.mts_params()?;
@@ -33,49 +51,34 @@ fn harmonic_gradients_for_model(params: &Params, mts: &MtsParams) -> Result<Vec<
     let harmonics: Vec<_> = (0..=params.gradient_harmonics).collect();
     let observable = Vec3::from_angles(FRAC_PI_2, FRAC_PI_2);
 
-    let accumulate_sample =
-        |gradients: &mut [f64], sample: &VelocitySample| -> Result<(), String> {
-            let at_offset = |offset| {
-                compute_demod_harmonics(
-                    &MtsParams {
-                        atom: DrivenAtomParams {
-                            hamiltonian: HamiltonianParams {
-                                delta: mts.atom.hamiltonian.delta + offset,
-                                ..params.probe_hamiltonian(mts, sample.kv)
-                            },
-                            ..mts.atom
+    let compute_sample = |kv| -> Result<Vec<f64>, String> {
+        let at_offset = |offset| {
+            compute_demod_harmonics(
+                &MtsParams {
+                    atom: DrivenAtomParams {
+                        hamiltonian: HamiltonianParams {
+                            delta: mts.atom.hamiltonian.delta + offset,
+                            ..params.probe_hamiltonian(mts, kv)
                         },
-                        ..*mts
+                        ..mts.atom
                     },
-                    observable,
-                    &harmonics,
-                )
-            };
-            let below = at_offset(-params.gradient_epsilon)?;
-            let above = at_offset(params.gradient_epsilon)?;
-            for ((gradient, below), above) in gradients.iter_mut().zip(below).zip(above) {
-                *gradient += sample.weight * (above.in_phase - below.in_phase);
-            }
-            Ok(())
+                    ..*mts
+                },
+                observable,
+                &harmonics,
+            )
         };
+        let below = at_offset(-params.gradient_epsilon)?;
+        let above = at_offset(params.gradient_epsilon)?;
+        Ok(below
+            .into_iter()
+            .zip(above)
+            .map(|(below, above)| above.in_phase - below.in_phase)
+            .collect())
+    };
 
-    let mut gradients = try_fold_chunks_ordered(
-        &samples,
-        params.compute_threads,
-        |sample| {
-            let mut gradients = vec![0.0; harmonics.len()];
-            accumulate_sample(&mut gradients, sample)?;
-            Ok(gradients)
-        },
-        |gradients, sample| accumulate_sample(gradients, sample),
-        |gradients, partial| {
-            for (gradient, partial) in gradients.iter_mut().zip(partial) {
-                *gradient += partial;
-            }
-            Ok(())
-        },
-    )?
-    .ok_or_else(|| "velocity sample count must be positive".to_string())?;
+    let mut gradients =
+        try_average_velocity_samples(&samples, params.compute_threads, compute_sample)?;
     let scale = 1.0 / (2.0 * params.gradient_epsilon);
     for gradient in &mut gradients {
         *gradient *= scale;

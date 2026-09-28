@@ -8,7 +8,7 @@ use atomic_clocks::vapourcell::{
 use myplotlib::{AppResult, Plotter};
 
 use crate::app::{Params, add_rabi_summaries};
-use crate::parallel::try_fold_chunks_ordered;
+use crate::parallel::{WeightedOutput, try_average_velocity_samples};
 use crate::units::to_mhz;
 
 const FREQUENCY_STEP: f64 = 0.02; // Maximum internal spacing, in rad / µs.
@@ -52,26 +52,32 @@ fn response_at_velocity_for_model(
     )
 }
 
-fn add_response(
-    sum: &mut LinearResponseOutput,
-    output: LinearResponseOutput,
-    weight: f64,
-) -> Result<(), String> {
-    if sum.times != output.times || sum.delays != output.delays {
-        return Err("velocity response grids do not match".to_string());
+impl WeightedOutput for LinearResponseOutput {
+    fn scale(&mut self, weight: f64) {
+        for row in &mut self.response {
+            for value in row {
+                *value *= weight;
+            }
+        }
     }
-    if sum.response.len() != output.response.len() {
-        return Err("velocity response dimensions do not match".to_string());
-    }
-    for (sum_row, row) in sum.response.iter_mut().zip(output.response) {
-        if sum_row.len() != row.len() {
+
+    fn try_add_scaled(&mut self, output: Self, weight: f64) -> Result<(), String> {
+        if self.times != output.times || self.delays != output.delays {
+            return Err("velocity response grids do not match".to_string());
+        }
+        if self.response.len() != output.response.len() {
             return Err("velocity response dimensions do not match".to_string());
         }
-        for (sum, value) in sum_row.iter_mut().zip(row) {
-            *sum += weight * value;
+        for (sum_row, row) in self.response.iter_mut().zip(output.response) {
+            if sum_row.len() != row.len() {
+                return Err("velocity response dimensions do not match".to_string());
+            }
+            for (sum, value) in sum_row.iter_mut().zip(row) {
+                *sum += weight * value;
+            }
         }
+        Ok(())
     }
-    Ok(())
 }
 
 pub(super) fn response_output(params: &Params) -> Result<LinearResponseOutput, String> {
@@ -85,28 +91,9 @@ fn response_output_for_model(
 ) -> Result<LinearResponseOutput, String> {
     let samples = params.velocity_params(mts)?.samples()?;
 
-    try_fold_chunks_ordered(
-        &samples,
-        params.compute_threads,
-        |sample| {
-            let mut output = response_at_velocity_for_model(params, mts, sample.kv)?;
-            for row in &mut output.response {
-                for value in row {
-                    *value *= sample.weight;
-                }
-            }
-            Ok(output)
-        },
-        |sum, sample| {
-            add_response(
-                sum,
-                response_at_velocity_for_model(params, mts, sample.kv)?,
-                sample.weight,
-            )
-        },
-        |sum, partial| add_response(sum, partial, 1.0),
-    )?
-    .ok_or_else(|| "velocity sample count must be positive".to_string())
+    try_average_velocity_samples(&samples, params.compute_threads, |kv| {
+        response_at_velocity_for_model(params, mts, kv)
+    })
 }
 
 pub(super) fn plot(params: &mut Params) -> AppResult {

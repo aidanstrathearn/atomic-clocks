@@ -1,4 +1,41 @@
+use atomic_clocks::vapourcell::VelocitySample;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+
+/// An output that supports weighted linear accumulation.
+pub(super) trait WeightedOutput: Send {
+    /// Multiplies all accumulated values by `weight`.
+    fn scale(&mut self, weight: f64);
+
+    /// Adds `weight * output` to this output.
+    fn try_add_scaled(&mut self, output: Self, weight: f64) -> Result<(), String>;
+}
+
+/// Computes and averages outputs over weighted velocity samples.
+///
+/// Work is split into a bounded number of chunks. Each chunk and the final
+/// partial results are accumulated in sample order.
+pub(super) fn try_average_velocity_samples<T, Compute>(
+    samples: &[VelocitySample],
+    max_tasks: usize,
+    compute: Compute,
+) -> Result<T, String>
+where
+    T: WeightedOutput,
+    Compute: Fn(f64) -> Result<T, String> + Sync,
+{
+    try_fold_chunks_ordered(
+        samples,
+        max_tasks,
+        |sample| {
+            let mut output = compute(sample.kv)?;
+            output.scale(sample.weight);
+            Ok(output)
+        },
+        |sum, sample| sum.try_add_scaled(compute(sample.kv)?, sample.weight),
+        |sum, partial| sum.try_add_scaled(partial, 1.0),
+    )?
+    .ok_or_else(|| "velocity sample count must be positive".to_string())
+}
 
 /// Folds indexed items into a bounded number of parallel partial results, then
 /// merges those partials in item order.
@@ -7,7 +44,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 /// item count. `start` creates each chunk's accumulator from its first item,
 /// avoiding any requirement for an identity value. Successful results have a
 /// stable reduction order for a given item count and task limit.
-pub(super) fn try_fold_chunks_ordered<I, A, E, Start, Fold, Merge>(
+fn try_fold_chunks_ordered<I, A, E, Start, Fold, Merge>(
     items: I,
     max_tasks: usize,
     start: Start,

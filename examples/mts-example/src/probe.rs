@@ -7,7 +7,7 @@ use atomic_clocks::vapourcell::{
 use myplotlib::{AppResult, Plotter};
 
 use crate::app::{Params, add_rabi_summaries};
-use crate::parallel::try_fold_chunks_ordered;
+use crate::parallel::{WeightedOutput, try_average_velocity_samples};
 use crate::units::to_mhz;
 
 pub(super) const DC_HARMONICS: [usize; 1] = [0];
@@ -117,33 +117,31 @@ pub(super) fn display_detuning(params: &MtsParams, detuning: f64) -> f64 {
     detuning + params.atom.hamiltonian.modulation.shift / 2.0
 }
 
-fn scale_demod_output<const N: usize>(output: &mut DemodOutput<N>, weight: f64) {
-    for values in &mut output.values {
-        for value in values {
-            value.in_phase *= weight;
-            value.quadrature *= weight;
+impl<const N: usize> WeightedOutput for DemodOutput<N> {
+    fn scale(&mut self, weight: f64) {
+        for values in &mut self.values {
+            for value in values {
+                value.in_phase *= weight;
+                value.quadrature *= weight;
+            }
         }
     }
-}
 
-fn add_demod_output<const N: usize>(
-    sum: &mut DemodOutput<N>,
-    output: DemodOutput<N>,
-    weight: f64,
-) -> Result<(), String> {
-    if sum.hz != output.hz {
-        return Err("velocity signal grids do not match".to_string());
-    }
-    if sum.harmonics != output.harmonics || sum.values.len() != output.values.len() {
-        return Err("velocity signal dimensions do not match".to_string());
-    }
-    for (sums, values) in sum.values.iter_mut().zip(output.values) {
-        for (sum, value) in sums.iter_mut().zip(values) {
-            sum.in_phase += weight * value.in_phase;
-            sum.quadrature += weight * value.quadrature;
+    fn try_add_scaled(&mut self, output: Self, weight: f64) -> Result<(), String> {
+        if self.hz != output.hz {
+            return Err("velocity signal grids do not match".to_string());
         }
+        if self.harmonics != output.harmonics || self.values.len() != output.values.len() {
+            return Err("velocity signal dimensions do not match".to_string());
+        }
+        for (sums, values) in self.values.iter_mut().zip(output.values) {
+            for (sum, value) in sums.iter_mut().zip(values) {
+                sum.in_phase += weight * value.in_phase;
+                sum.quadrature += weight * value.quadrature;
+            }
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -186,18 +184,7 @@ fn velocity_average_for_model<const N: usize>(
         )
     };
 
-    try_fold_chunks_ordered(
-        &samples,
-        params.compute_threads,
-        |sample| {
-            let mut output = compute_sample(sample.kv)?;
-            scale_demod_output(&mut output, sample.weight);
-            Ok(output)
-        },
-        |sum, sample| add_demod_output(sum, compute_sample(sample.kv)?, sample.weight),
-        |sum, partial| add_demod_output(sum, partial, 1.0),
-    )?
-    .ok_or_else(|| "velocity sample count must be positive".to_string())
+    try_average_velocity_samples(&samples, params.compute_threads, compute_sample)
 }
 
 pub(super) fn dc_plot(params: &mut Params) -> AppResult {
