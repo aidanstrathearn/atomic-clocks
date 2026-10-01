@@ -24,6 +24,10 @@ name = "propagation"
 harness = false
 
 [[bench]]
+name = "bloch_state"
+harness = false
+
+[[bench]]
 name = "mts_ab"
 harness = false
 

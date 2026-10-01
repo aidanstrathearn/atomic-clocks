@@ -46,10 +46,27 @@ impl Vec3 {
         }
     }
 
+    /// Rotates this vector about the unit axis `k` using the right-hand rule.
+    #[must_use]
+    #[inline]
     pub fn rotate(self, k: Self, angle: f64) -> Self {
-        let sin = angle.sin();
-        let cos = angle.cos();
+        let (sin, cos) = angle.sin_cos();
         self * cos + k.cross(self) * sin + k * (self.dot(k) * (1.0 - cos))
+    }
+
+    /// Rotates this vector about +z using the right-hand rule.
+    ///
+    /// This specialized form preserves `z` exactly and avoids the extra work
+    /// of a general Rodrigues rotation.
+    #[must_use]
+    #[inline]
+    pub fn rotate_about_z(self, angle: f64) -> Self {
+        let (sin, cos) = angle.sin_cos();
+        Self {
+            x: cos * self.x - sin * self.y,
+            y: sin * self.x + cos * self.y,
+            z: self.z,
+        }
     }
 }
 
