@@ -17,8 +17,14 @@ pub struct Transition {
 }
 
 impl Transition {
+    /// Transition wavelength in metres.
     pub fn wavelength_m(&self) -> f64 {
         self.wavelength_nm * 1e-9
+    }
+
+    /// Transition frequency in hertz.
+    pub fn frequency_hz(&self) -> f64 {
+        SPEED_OF_LIGHT / self.wavelength_m()
     }
 
     /// Resonant single-atom Rabi angular frequency for the laser intensity.

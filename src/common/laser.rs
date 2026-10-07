@@ -25,6 +25,25 @@ impl Laser {
         PLANCK_CONSTANT_J_S * SPEED_OF_LIGHT / wavelength_m
     }
 
+    /// Pure-dephasing angular rate implied by the Lorentzian linewidth.
+    pub fn pure_dephasing_angular_rate(&self) -> f64 {
+        PI * self.linewidth_fwhm_hz
+    }
+
+    /// Absolute Allan deviation implied by a Lorentzian linewidth produced by
+    /// white frequency noise.
+    pub fn white_frequency_noise_adev_hz(&self, averaging_time_s: f64) -> f64 {
+        if !self.linewidth_fwhm_hz.is_finite()
+            || self.linewidth_fwhm_hz < 0.0
+            || !averaging_time_s.is_finite()
+            || averaging_time_s <= 0.0
+        {
+            return f64::NAN;
+        }
+
+        (self.linewidth_fwhm_hz / (2.0 * PI * averaging_time_s)).sqrt()
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.validate_as("laser")
     }
@@ -43,5 +62,50 @@ impl Laser {
             return Err(format!("{name} linewidth must be finite and nonnegative"));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn laser_with_linewidth(linewidth_fwhm_hz: f64) -> Laser {
+        Laser {
+            power_milliwatts: 1.0,
+            waist_radius_mm: 1.0,
+            wavelength_nm: 578.0,
+            linewidth_fwhm_hz,
+        }
+    }
+
+    #[test]
+    fn lorentzian_linewidth_sets_dephasing_and_white_frequency_noise_adev() {
+        let laser = laser_with_linewidth(200.0);
+        let averaging_time_s = 2.5;
+
+        assert_eq!(laser.pure_dephasing_angular_rate(), PI * 200.0);
+        assert_eq!(
+            laser.white_frequency_noise_adev_hz(averaging_time_s),
+            (200.0 / (2.0 * PI * averaging_time_s)).sqrt()
+        );
+    }
+
+    #[test]
+    fn white_frequency_noise_adev_rejects_invalid_inputs() {
+        for linewidth_fwhm_hz in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                laser_with_linewidth(linewidth_fwhm_hz)
+                    .white_frequency_noise_adev_hz(1.0)
+                    .is_nan()
+            );
+        }
+        let laser = laser_with_linewidth(200.0);
+        for averaging_time_s in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                laser
+                    .white_frequency_noise_adev_hz(averaging_time_s)
+                    .is_nan()
+            );
+        }
     }
 }
