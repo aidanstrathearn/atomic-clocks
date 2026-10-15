@@ -9,6 +9,8 @@ pub struct Laser {
     pub wavelength_nm: f64,
     /// Lorentzian optical power-spectrum FWHM in ordinary-frequency units.
     pub linewidth_fwhm_hz: f64,
+    /// One-sided white relative intensity-noise PSD in linear Hz⁻¹ units.
+    pub white_rin_per_hz: f64,
 }
 
 impl Laser {
@@ -28,6 +30,14 @@ impl Laser {
     /// Pure-dephasing angular rate implied by the Lorentzian linewidth.
     pub fn pure_dephasing_angular_rate(&self) -> f64 {
         PI * self.linewidth_fwhm_hz
+    }
+
+    /// Drive-axis dephasing rate produced by one-sided white relative
+    /// intensity noise.
+    ///
+    /// This uses the weak-noise relation `delta Omega / Omega = delta I / (2 I)`.
+    pub fn white_rabi_dephasing_angular_rate(&self, rabi_angular_frequency: f64) -> f64 {
+        rabi_angular_frequency.powi(2) * self.white_rin_per_hz / 16.0
     }
 
     /// Absolute Allan deviation implied by a Lorentzian linewidth produced by
@@ -61,6 +71,11 @@ impl Laser {
         if !self.linewidth_fwhm_hz.is_finite() || self.linewidth_fwhm_hz < 0.0 {
             return Err(format!("{name} linewidth must be finite and nonnegative"));
         }
+        if !self.white_rin_per_hz.is_finite() || self.white_rin_per_hz < 0.0 {
+            return Err(format!(
+                "{name} white RIN PSD must be finite and nonnegative"
+            ));
+        }
         Ok(())
     }
 }
@@ -75,6 +90,7 @@ mod tests {
             waist_radius_mm: 1.0,
             wavelength_nm: 578.0,
             linewidth_fwhm_hz,
+            white_rin_per_hz: 0.0,
         }
     }
 
@@ -106,6 +122,31 @@ mod tests {
                     .white_frequency_noise_adev_hz(averaging_time_s)
                     .is_nan()
             );
+        }
+    }
+
+    #[test]
+    fn white_rin_sets_rabi_dephasing_from_the_actual_rabi_frequency() {
+        let laser = Laser {
+            white_rin_per_hz: 2.5e-12,
+            ..laser_with_linewidth(0.0)
+        };
+        let rabi_angular_frequency = 12_000.0;
+
+        assert_eq!(
+            laser.white_rabi_dephasing_angular_rate(rabi_angular_frequency),
+            rabi_angular_frequency.powi(2) * 2.5e-12 / 16.0
+        );
+    }
+
+    #[test]
+    fn laser_validation_rejects_invalid_white_rin() {
+        for white_rin_per_hz in [-1.0, f64::NAN, f64::INFINITY] {
+            let laser = Laser {
+                white_rin_per_hz,
+                ..laser_with_linewidth(0.0)
+            };
+            assert!(laser.validate().is_err());
         }
     }
 }
