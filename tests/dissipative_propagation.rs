@@ -1,6 +1,6 @@
 use atomic_clocks::twolevel::{
     BlochVec, Channel, Decay, DephasingLiouvillian, DephasingStep, DissipativeStep, Hamiltonian,
-    Liouvillian, Process, Vec3, steps,
+    Liouvillian, PauliDephasingLiouvillian, Process, Vec3, steps,
 };
 
 fn state(x: f64, y: f64, z: f64) -> BlochVec {
@@ -247,6 +247,116 @@ fn general_pure_dephasing_is_unital_composable_and_matches_its_affine_form() {
     let forward = first.apply_traceless(r);
     let backward = first.pull_back_traceless_observable(o);
     assert!((o.dot(forward) - backward.dot(r)).abs() < 1e-14);
+}
+
+#[test]
+fn pauli_dephasing_without_a_hamiltonian_damps_perpendicular_components() {
+    let initial = state(0.2, -0.3, 0.4);
+    let gamma_x = 0.2;
+    let gamma_y = 0.3;
+    let gamma_z = 0.5;
+    let liouvillian = PauliDephasingLiouvillian {
+        hamiltonian: Hamiltonian::default(),
+        gamma_x,
+        gamma_y,
+        gamma_z,
+    };
+
+    for dt in [0.0, 0.2, 1.0, 5.0] {
+        let step = liouvillian.for_duration(dt);
+        let expected = state(
+            (-(gamma_y + gamma_z) * dt).exp() * initial.r.x,
+            (-(gamma_z + gamma_x) * dt).exp() * initial.r.y,
+            (-(gamma_x + gamma_y) * dt).exp() * initial.r.z,
+        );
+        assert_state(step.apply_to(initial), expected);
+        assert_state(step.to_affine().apply_to(initial), expected);
+    }
+}
+
+#[test]
+fn z_only_pauli_dephasing_matches_the_existing_liouvillian() {
+    let hamiltonian = Hamiltonian::new(1.3, -0.4, 0.7);
+    let gamma_phi = 0.3;
+    let existing = DephasingLiouvillian {
+        hamiltonian,
+        gamma_phi,
+    };
+    let pauli = PauliDephasingLiouvillian {
+        hamiltonian,
+        gamma_x: 0.0,
+        gamma_y: 0.0,
+        gamma_z: gamma_phi,
+    };
+
+    for dt in [0.0, 1e-4, 0.2, 1.0, 5.0] {
+        let existing_step = existing.for_duration(dt);
+        let pauli_step = pauli.for_duration(dt);
+        for initial in initial_states() {
+            assert_state(
+                pauli_step.apply_to(initial),
+                existing_step.apply_to(initial),
+            );
+            assert_state(
+                pauli_step.to_affine().apply_to(initial),
+                existing_step.to_affine().apply_to(initial),
+            );
+        }
+    }
+}
+
+#[test]
+fn general_pauli_dephasing_is_unital_composable_and_matches_its_affine_form() {
+    let liouvillian = PauliDephasingLiouvillian {
+        hamiltonian: Hamiltonian::new(1.3, -0.4, 0.7),
+        gamma_x: 0.2,
+        gamma_y: 0.1,
+        gamma_z: 0.3,
+    };
+    let first: DephasingStep = liouvillian.for_duration(0.3);
+    let second = liouvillian.for_duration(0.7);
+    let combined = liouvillian.for_duration(1.0);
+
+    assert_state(first.apply_to(state(0.0, 0.0, 0.0)), state(0.0, 0.0, 0.0));
+    for initial in initial_states() {
+        assert_state(
+            second.apply_to(first.apply_to(initial)),
+            combined.apply_to(initial),
+        );
+        assert_state(first.to_affine().apply_to(initial), first.apply_to(initial));
+    }
+
+    let r = Vec3 {
+        x: 0.2,
+        y: -0.3,
+        z: 0.4,
+    };
+    let o = Vec3 {
+        x: -0.5,
+        y: 0.7,
+        z: 0.1,
+    };
+    let forward = first.apply_traceless(r);
+    let backward = first.pull_back_traceless_observable(o);
+    assert!((o.dot(forward) - backward.dot(r)).abs() < 1e-14);
+}
+
+#[test]
+fn zero_pauli_dephasing_matches_unitary_evolution() {
+    let hamiltonian = Hamiltonian::new(0.4, -0.7, 1.1);
+    let liouvillian = PauliDephasingLiouvillian {
+        hamiltonian,
+        gamma_x: 0.0,
+        gamma_y: 0.0,
+        gamma_z: 0.0,
+    };
+    for dt in [0.0, 1e-4, 0.2, 1.0, 5.0] {
+        let actual = liouvillian.for_duration(dt);
+        let expected = hamiltonian.for_duration(dt);
+        for initial in initial_states() {
+            assert_state(actual.apply_to(initial), expected.apply_to(initial));
+        }
+    }
 }
 
 #[test]

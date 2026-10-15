@@ -9,7 +9,7 @@ pub use crate::maths::vec3::Vec3;
 pub use channel::{AffineChannel, Channel, ComposableChannel};
 pub use evolution::{
     Decay, DephasingLiouvillian, DephasingStep, DissipativeStep, Hamiltonian, Liouvillian,
-    TimeDependentHamiltonian, TrotterConfig, Unitary,
+    PauliDephasingLiouvillian, TimeDependentHamiltonian, TrotterConfig, Unitary,
 };
 pub use observable::Observable;
 pub use process::{ChannelPair, Process, steps};

@@ -186,8 +186,68 @@ impl DephasingLiouvillian {
     }
 }
 
+/// Hamiltonian and independent pure-dephasing rates about the three Pauli axes
+/// for a two-level system without population decay or excitation.
+///
+/// A rate about one axis leaves that Bloch-vector component unchanged and
+/// damps each perpendicular component at that rate.
+#[derive(Copy, Clone)]
+pub struct PauliDephasingLiouvillian {
+    pub hamiltonian: Hamiltonian,
+    pub gamma_x: f64,
+    pub gamma_y: f64,
+    pub gamma_z: f64,
+}
+
+impl PauliDephasingLiouvillian {
+    /// Prepare evolution under this constant generator for `dt`.
+    ///
+    /// The duration and dephasing rates must be finite and nonnegative.
+    pub fn for_duration(&self, dt: f64) -> DephasingStep {
+        assert!(
+            [self.gamma_x, self.gamma_y, self.gamma_z]
+                .into_iter()
+                .all(|rate| rate.is_finite() && rate >= 0.0),
+            "pure-dephasing rates must be nonnegative and finite"
+        );
+        assert!(
+            dt.is_finite() && dt >= 0.0,
+            "evolution duration must be nonnegative and finite"
+        );
+
+        let h = self.hamiltonian.r;
+        let damping_x = self.gamma_y + self.gamma_z;
+        let damping_y = self.gamma_z + self.gamma_x;
+        let damping_z = self.gamma_x + self.gamma_y;
+        let generator = Mat3::from_rows([
+            [-damping_x, -h.z, h.y],
+            [h.z, -damping_y, -h.x],
+            [-h.y, h.x, -damping_z],
+        ]);
+        let symmetric = (
+            damping_x + damping_y + damping_z,
+            damping_x * damping_y + damping_x * damping_z + damping_y * damping_z + h.norm_square(),
+            damping_x * damping_y * damping_z
+                + damping_x * h.x * h.x
+                + damping_y * h.y * h.y
+                + damping_z * h.z * h.z,
+        );
+        let eigs = cubic_roots(symmetric);
+        let coefficients = cayley_coeffs(symmetric, eigs, dt);
+
+        let linear = if cayley_result_is_well_conditioned(eigs, coefficients) {
+            let (c0, c1, c2) = coefficients;
+            c0 * Mat3::identity() + c1 * generator + c2 * (generator * generator)
+        } else {
+            matrix_exp(generator * dt)
+        };
+
+        DephasingStep { linear }
+    }
+}
+
 /// Prepared evolution over one interval of a constant
-/// [`DephasingLiouvillian`].
+/// [`DephasingLiouvillian`] or [`PauliDephasingLiouvillian`].
 ///
 /// Unlike [`DissipativeStep`], this channel is unital: it has no population
 /// source or affine shift.
