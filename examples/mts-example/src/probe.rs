@@ -92,7 +92,7 @@ fn dc_signal_plot(params: &MtsParams, output: &DcCurve) -> Plotter {
         .map(|&hz| to_mhz(display_detuning(params, hz)))
         .collect();
     plot.plot(&detunings_mhz, &output.values);
-    plot.ylabel("Transmission");
+    plot.ylabel("DC Transmission");
     plot
 }
 
@@ -109,7 +109,7 @@ fn harmonic_signal_plot(params: &MtsParams, output: &HarmonicCurves) -> Plotter 
         .label("Second harmonic");
     plot.plot(&detunings_mhz, &output.proj3)
         .label("Third harmonic");
-    plot.ylabel("Normalized transmission change");
+    plot.ylabel("Demodulated Transmission");
     plot
 }
 

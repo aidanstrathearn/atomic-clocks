@@ -46,7 +46,7 @@ fn atom_control_groups<'a>(
         *pump_waist
     })
     .logarithmic(true);
-    let density = Slider::new("Density (m⁻³)", density_per_m3, 1.0e17..=1.0e20)
+    let density = Slider::new("Density (1/m³)", density_per_m3, 1.0e17..=1.0e20)
         .logarithmic(true)
         .custom_formatter(|value, _| format!("{value:.2e}"));
     let length = Slider::from_get_set("Cell length (mm)", 1.0..=100.0, move |length_mm| {
@@ -97,10 +97,10 @@ fn velocity_control_group(params: &mut VelocityIntegrationParams) -> SliderGroup
     SliderGroup::new(
         "Velocity distribution",
         [
-            frequency_slider("Sigma", &mut params.sigma, 0.0..=3000.0).logarithmic(true),
-            frequency_slider("Integration window", &mut params.half_width, 0.1..=200.0),
+            frequency_slider("Sigma (MHz)", &mut params.sigma, 0.0..=3000.0).logarithmic(true),
+            frequency_slider("Integration window (MHz)", &mut params.half_width, 0.1..=200.0),
             frequency_slider(
-                "Maximum velocity step",
+                "Integration step (MHz)",
                 &mut params.max_step,
                 0.05 * TAU..=5.0 * TAU,
             )

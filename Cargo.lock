@@ -1427,7 +1427,6 @@ dependencies = [
 [[package]]
 name = "myplotlib"
 version = "0.1.2"
-source = "git+https://github.com/aidanstrathearn/myplotlib.git?tag=v0.1.2#fc7f19aed0fc7f38db6f12019ee03d1d22959ae8"
 dependencies = [
  "csv",
  "eframe",

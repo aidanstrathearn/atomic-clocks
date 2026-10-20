@@ -169,10 +169,10 @@ pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
     let step = atom.modulation.period() / mts.solver.steps_per_period as f64;
     let mut plot = Plotter::new();
     for (harmonic, label) in [
-        (0, "Mean response"),
-        (1, "First harmonic (in phase)"),
-        (2, "Second harmonic (in phase)"),
-        (3, "Third harmonic (in phase)"),
+        (0, "DC"),
+        (1, "First harmonic"),
+        (2, "Second harmonic"),
+        (3, "Third harmonic"),
     ] {
         let response = demodulated_transmission_response(&output, harmonic, gain);
         // Match the Ramsey example: transform the real kernel over delay,
@@ -192,7 +192,7 @@ pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
         plot.plot(&frequencies_mhz, &magnitude).label(label);
     }
     plot.xlabel("Frequency (MHz)");
-    plot.ylabel("Fourier magnitude of normalized transmission response");
+    plot.ylabel("Transfer magnitude");
     plot.xlim(0.0, to_mhz(PI / step));
     //plot.yscale(AxisScale::Log10);
     add_rabi_summaries(&mut plot, &mts);
