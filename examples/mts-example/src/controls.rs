@@ -5,7 +5,7 @@ use atomic_clocks::vapourcell::{MtsExperiment, MtsSolverParams, VapourCell};
 use myplotlib::{Slider, SliderGrid, SliderGroup};
 
 use crate::app::{Params, VelocityIntegrationParams};
-use crate::units::frequency_slider;
+use crate::units::{frequency_slider, gaussian_fwhm_slider};
 
 struct CommonControls<'a> {
     pump: &'a mut Laser,
@@ -38,7 +38,7 @@ fn atom_control_groups<'a>(
     let probe_power = &mut probe.power_milliwatts;
     let pump_waist = &mut pump.waist_radius_mm;
     let probe_waist = &mut probe.waist_radius_mm;
-    let common_waist = Slider::from_get_set("Beam waist radius (mm)", 0.1..=5.0, move |waist| {
+    let common_waist = Slider::from_get_set("Waist radius (mm)", 0.1..=5.0, move |waist| {
         if let Some(waist) = waist {
             *pump_waist = waist;
             *probe_waist = waist;
@@ -82,7 +82,7 @@ fn atom_control_groups<'a>(
             "Transition and cell",
             [
                 Slider::new(
-                    "Pure dephasing (MHz)",
+                    "Dephasing (MHz)",
                     pure_dephasing_rate,
                     0.0..=10.0 / TAU,
                 ),
@@ -97,8 +97,8 @@ fn velocity_control_group(params: &mut VelocityIntegrationParams) -> SliderGroup
     SliderGroup::new(
         "Velocity distribution",
         [
-            frequency_slider("Sigma (MHz)", &mut params.sigma, 0.0..=3000.0).logarithmic(true),
-            frequency_slider("Integration window (MHz)", &mut params.half_width, 0.1..=200.0),
+            gaussian_fwhm_slider("FWHM (MHz)", &mut params.sigma, 0.0..=3000.0).logarithmic(true),
+            frequency_slider("Integration range (MHz)", &mut params.half_width, 0.1..=200.0),
             frequency_slider(
                 "Integration step (MHz)",
                 &mut params.max_step,
@@ -142,7 +142,7 @@ fn common_control_groups(params: CommonControls<'_>) -> [SliderGroup<'_>; 5] {
     let solver = SliderGroup::new(
         "Solver",
         [
-            Slider::new("Spatial phase samples", kr_n, 1..=21).step_by(2.0),
+            Slider::new("Spatial samples", kr_n, 1..=21).step_by(2.0),
             Slider::new("Steps per period", steps_per_period, 20..=500),
             Slider::from_get_set("Warmup periods", 0.0..=10.0, move |warmup| {
                 if let Some(warmup) = warmup {
@@ -181,7 +181,7 @@ fn scan_control_group<'a>(half_range: &'a mut f64, sample_count: &'a mut usize) 
         "Scan",
         [
             Slider::new(
-                "Detuning half-range (MHz)",
+                "Detuning range (MHz)",
                 half_range,
                 0.1 / TAU..=105.0 / TAU,
             ),

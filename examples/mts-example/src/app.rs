@@ -76,7 +76,7 @@ impl Default for Params {
                 time_scale,
                 cell: VapourCell {
                     transition,
-                    density_per_m3: 1.0e18,
+                    density_per_m3: 1.0e17,
                     length_m: 0.02,
                 },
                 pump: Laser {
@@ -169,22 +169,22 @@ pub(crate) fn definition() -> AppDefinition<Params> {
         ViewOption::new("Harmonics", probe::harmonic_plot, controls::signal),
         ViewOption::new("DC signal", probe::dc_plot, controls::signal),
         //ViewOption::new("Linear response", response::plot, controls::response),
-        ViewOption::new(
-            "Linear response",
-            response::demodulated_plot,
-            controls::demodulated_response,
-        ),
+        // ViewOption::new(
+        //     "Linear response",
+        //     response::demodulated_plot,
+        //     controls::demodulated_response,
+        // ),
         ViewOption::new(
             "Transfer function",
             response::frequency_plot,
             controls::demodulated_response,
         ),
         //ViewOption::new("Harmonic gradients", gradients::plot, controls::gradients),
-        ViewOption::new(
-            "Intermod. noise",
-            gradients::adjacent_plot,
-            controls::gradients,
-        ),
+        // ViewOption::new(
+        //     "Intermod. noise",
+        //     gradients::adjacent_plot,
+        //     controls::gradients,
+        // ),
     ];
-    AppDefinition::new("MTS velocity", VIEWS)
+    AppDefinition::new("MTS", VIEWS)
 }
