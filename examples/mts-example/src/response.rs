@@ -7,7 +7,7 @@ use atomic_clocks::vapourcell::{
 };
 use myplotlib::{AppResult, Plotter};
 
-use crate::app::{Params, add_rabi_summaries};
+use crate::app::{Params, add_summaries};
 use crate::parallel::{WeightedOutput, try_average_velocity_samples};
 use crate::units::to_mhz;
 
@@ -118,7 +118,7 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
         0.0,
         params.response_delay_periods as f64 * mts.atom.hamiltonian.modulation.period(),
     );
-    add_rabi_summaries(&mut plot, &mts);
+    add_summaries(&mut plot, params, &mts);
     Ok(plot)
 }
 
@@ -157,7 +157,7 @@ pub(super) fn demodulated_plot(params: &mut Params) -> AppResult {
         0.0,
         params.response_delay_periods as f64 * mts.atom.hamiltonian.modulation.period(),
     );
-    add_rabi_summaries(&mut plot, &mts);
+    add_summaries(&mut plot, params, &mts);
     Ok(plot)
 }
 
@@ -195,6 +195,6 @@ pub(super) fn frequency_plot(params: &mut Params) -> AppResult {
     plot.ylabel("Transfer magnitude");
     plot.xlim(0.0, to_mhz(PI / step));
     //plot.yscale(AxisScale::Log10);
-    add_rabi_summaries(&mut plot, &mts);
+    add_summaries(&mut plot, params, &mts);
     Ok(plot)
 }

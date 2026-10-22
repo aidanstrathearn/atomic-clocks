@@ -83,6 +83,14 @@ pub const YB171_CLOCK: TwoLevelAtom = TwoLevelAtom {
         linewidth_hz: 0.007,
     },
 };
+pub const YB174_CLOCK: TwoLevelAtom = TwoLevelAtom {
+    mass_u: 173.938_867_5,
+    transition: Transition {
+        wavelength_nm: 556.0,
+        linewidth_hz: 1.82e5,
+    },
+};
+
 
 #[cfg(test)]
 mod tests {

@@ -6,7 +6,7 @@ use atomic_clocks::vapourcell::{
 };
 use myplotlib::{AppResult, Plotter};
 
-use crate::app::{Params, add_rabi_summaries};
+use crate::app::{Params, add_summaries};
 use crate::parallel::{WeightedOutput, try_average_velocity_samples};
 use crate::units::to_mhz;
 
@@ -73,35 +73,35 @@ impl HarmonicCurves {
     }
 }
 
-fn new_signal_plot(params: &MtsParams) -> Plotter {
+fn new_signal_plot(params: &Params, mts: &MtsParams) -> Plotter {
     let mut plot = Plotter::new();
     plot.xlabel("Detuning (MHz)");
     plot.xlim(
-        to_mhz(display_detuning(params, -params.scan.hz_lim)),
-        to_mhz(display_detuning(params, params.scan.hz_lim)),
+        to_mhz(display_detuning(mts, -mts.scan.hz_lim)),
+        to_mhz(display_detuning(mts, mts.scan.hz_lim)),
     );
-    add_rabi_summaries(&mut plot, params);
+    add_summaries(&mut plot, params, mts);
     plot
 }
 
-fn dc_signal_plot(params: &MtsParams, output: &DcCurve) -> Plotter {
-    let mut plot = new_signal_plot(params);
+fn dc_signal_plot(params: &Params, mts: &MtsParams, output: &DcCurve) -> Plotter {
+    let mut plot = new_signal_plot(params, mts);
     let detunings_mhz: Vec<_> = output
         .hz
         .iter()
-        .map(|&hz| to_mhz(display_detuning(params, hz)))
+        .map(|&hz| to_mhz(display_detuning(mts, hz)))
         .collect();
     plot.plot(&detunings_mhz, &output.values);
     plot.ylabel("DC Transmission");
     plot
 }
 
-fn harmonic_signal_plot(params: &MtsParams, output: &HarmonicCurves) -> Plotter {
-    let mut plot = new_signal_plot(params);
+fn harmonic_signal_plot(params: &Params, mts: &MtsParams, output: &HarmonicCurves) -> Plotter {
+    let mut plot = new_signal_plot(params, mts);
     let detunings_mhz: Vec<_> = output
         .hz
         .iter()
-        .map(|&hz| to_mhz(display_detuning(params, hz)))
+        .map(|&hz| to_mhz(display_detuning(mts, hz)))
         .collect();
     plot.plot(&detunings_mhz, &output.proj1)
         .label("First harmonic");
@@ -194,7 +194,7 @@ pub(super) fn dc_plot(params: &mut Params) -> AppResult {
         velocity_average_for_model(params, &mts, DC_HARMONICS)?,
         gain,
     );
-    Ok(dc_signal_plot(&mts, &output))
+    Ok(dc_signal_plot(params, &mts, &output))
 }
 
 pub(super) fn harmonic_plot(params: &mut Params) -> AppResult {
@@ -204,5 +204,5 @@ pub(super) fn harmonic_plot(params: &mut Params) -> AppResult {
         velocity_average_for_model(params, &mts, MODULATION_HARMONICS)?,
         gain,
     );
-    Ok(harmonic_signal_plot(&mts, &output))
+    Ok(harmonic_signal_plot(params, &mts, &output))
 }

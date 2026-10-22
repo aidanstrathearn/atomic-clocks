@@ -1,6 +1,6 @@
 use std::f64::consts::TAU;
 
-use atomic_clocks::common::{Laser, Transition};
+use atomic_clocks::common::{consts::BOLTZMANN_CONSTANT_J_PER_K, Laser, Transition, TwoLevelAtom, YB174_CLOCK};
 use atomic_clocks::vapourcell::{
     Frame, HamiltonianParams, LinearResponseSolverParams, ModelTimeScale, MtsExperiment, MtsParams,
     MtsSolverParams, VapourCell, VelocityParams,
@@ -66,16 +66,13 @@ impl VelocityIntegrationParams {
 impl Default for Params {
     fn default() -> Self {
         let time_scale = ModelTimeScale::MICROSECONDS;
-        let transition = Transition {
-            wavelength_nm: 556.0,
-            // Reproduces the previous gamma_down = 1 rad / microsecond.
-            linewidth_hz: 1.82e5, //1.0 / (TAU * time_scale.seconds_per_unit()),
-        };
+        let atom = YB174_CLOCK;
+        let transition = atom.transition;
         Self {
             experiment: MtsExperiment {
                 time_scale,
                 cell: VapourCell {
-                    transition,
+                    atom,
                     density_per_m3: 1.0e17,
                     length_m: 0.02,
                 },
@@ -99,7 +96,7 @@ impl Default for Params {
                 pump_probe_offset: 0.0,
                 pure_dephasing_rate: 0.5,
                 scan_half_range: 20.0 / TAU,
-                scan_samples: 40,
+                scan_samples: 20,
             },
             solver: MtsSolverParams::default(),
             velocity: VelocityIntegrationParams::default(),
@@ -123,6 +120,15 @@ impl Params {
             .experiment
             .probe_readout()?
             .optical_depth_per_coherence())
+    }
+
+    /// Temperature implied by the one-dimensional Maxwell-Boltzmann velocity width.
+    pub(super) fn effective_temperature_kelvin(&self) -> f64 {
+        let atom = self.experiment.cell.atom;
+        let angular_sigma_per_second =
+            self.velocity.sigma / self.experiment.time_scale.seconds_per_unit();
+        let velocity_sigma = angular_sigma_per_second * atom.transition.wavelength_m() / TAU;
+        atom.mass_kg() * velocity_sigma.powi(2) / BOLTZMANN_CONSTANT_J_PER_K
     }
 
     /// Returns the physical velocity distribution in coordinates centred on
@@ -152,7 +158,7 @@ impl Params {
     }
 }
 
-pub(super) fn add_rabi_summaries(plot: &mut Plotter, mts: &MtsParams) {
+pub(super) fn add_summaries(plot: &mut Plotter, params: &Params, mts: &MtsParams) {
     let hamiltonian = &mts.atom.hamiltonian;
     plot.add_summary(
         "Pump Rabi frequency",
@@ -161,6 +167,10 @@ pub(super) fn add_rabi_summaries(plot: &mut Plotter, mts: &MtsParams) {
     plot.add_summary(
         "Probe Rabi frequency",
         format!("{:.4} MHz", to_mhz(hamiltonian.r_prbe)),
+    );
+    plot.add_summary(
+        "Effective temperature",
+        format!("{:.3} K", params.effective_temperature_kelvin()),
     );
 }
 

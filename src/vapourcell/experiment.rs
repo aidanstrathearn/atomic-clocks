@@ -1,6 +1,6 @@
 use std::f64::consts::TAU;
 
-use crate::common::{DetuningScanParams, Laser, Transition};
+use crate::common::{DetuningScanParams, Laser, TwoLevelAtom};
 use crate::maths::demodulation::ModulationParams;
 use crate::twolevel::Decay;
 
@@ -42,14 +42,14 @@ impl ModelTimeScale {
 
 #[derive(Clone, Copy, Debug)]
 pub struct VapourCell {
-    pub transition: Transition,
+    pub atom: TwoLevelAtom,
     pub density_per_m3: f64,
     pub length_m: f64,
 }
 
 impl VapourCell {
     pub fn validate(&self) -> Result<(), String> {
-        self.transition.validate()?;
+        self.atom.validate()?;
         if !self.density_per_m3.is_finite() || self.density_per_m3 < 0.0 {
             return Err("vapour-cell density must be finite and nonnegative".to_string());
         }
@@ -121,7 +121,7 @@ impl MtsExperiment {
     /// low-level parameters.
     pub fn to_mts_params(&self, solver: MtsSolverParams) -> Result<MtsParams, String> {
         self.validate()?;
-        let transition = self.cell.transition;
+        let transition = self.cell.atom.transition;
         let params = MtsParams {
             atom: DrivenAtomParams {
                 hamiltonian: HamiltonianParams {
@@ -161,14 +161,18 @@ impl MtsExperiment {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::Transition;
 
     fn experiment() -> MtsExperiment {
         MtsExperiment {
             time_scale: ModelTimeScale::MICROSECONDS,
             cell: VapourCell {
-                transition: Transition {
-                    wavelength_nm: 780.24,
-                    linewidth_hz: 6.065e6,
+                atom: TwoLevelAtom {
+                    mass_u: 86.909_180_53,
+                    transition: Transition {
+                        wavelength_nm: 780.24,
+                        linewidth_hz: 6.065e6,
+                    },
                 },
                 density_per_m3: 2.5e16,
                 length_m: 0.075,
@@ -229,6 +233,7 @@ mod tests {
             experiment.time_scale.angular_rate(
                 experiment
                     .cell
+                    .atom
                     .transition
                     .rabi_freq_radians_per_s(&experiment.pump)
             )
@@ -238,6 +243,7 @@ mod tests {
             experiment.time_scale.angular_rate(
                 experiment
                     .cell
+                    .atom
                     .transition
                     .rabi_freq_radians_per_s(&experiment.probe)
             )
@@ -247,7 +253,7 @@ mod tests {
             params.atom.decay.gamma_down,
             experiment
                 .time_scale
-                .angular_rate(TAU * experiment.cell.transition.linewidth_hz)
+                .angular_rate(TAU * experiment.cell.atom.transition.linewidth_hz)
         );
         assert_eq!(
             params.atom.decay.gamma_phi,
@@ -288,6 +294,19 @@ mod tests {
         assert_eq!(
             original.atom.hamiltonian.r_prbe,
             changed.atom.hamiltonian.r_prbe
+        );
+    }
+
+    #[test]
+    fn experiment_rejects_an_invalid_atomic_mass() {
+        let mut experiment = experiment();
+        experiment.cell.atom.mass_u = 0.0;
+
+        assert_eq!(
+            experiment
+                .to_mts_params(MtsSolverParams::default())
+                .unwrap_err(),
+            "atomic mass must be positive and finite"
         );
     }
 }

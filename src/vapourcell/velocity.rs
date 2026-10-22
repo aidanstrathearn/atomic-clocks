@@ -18,7 +18,7 @@ impl Default for VelocityParams {
     fn default() -> Self {
         Self {
             mean: 0.0,
-            sigma: 10.0,
+            sigma: 1500.0,
             half_width: 0.01,
             sample_count: 1,
         }

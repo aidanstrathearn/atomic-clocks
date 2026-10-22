@@ -97,7 +97,7 @@ fn velocity_control_group(params: &mut VelocityIntegrationParams) -> SliderGroup
     SliderGroup::new(
         "Velocity distribution",
         [
-            gaussian_fwhm_slider("FWHM (MHz)", &mut params.sigma, 0.0..=3000.0).logarithmic(true),
+            gaussian_fwhm_slider("FWHM (MHz)", &mut params.sigma, 0.0..=3000.0),
             frequency_slider("Integration range (MHz)", &mut params.half_width, 0.1..=200.0),
             frequency_slider(
                 "Integration step (MHz)",

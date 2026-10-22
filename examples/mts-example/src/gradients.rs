@@ -6,7 +6,7 @@ use atomic_clocks::vapourcell::{
 };
 use myplotlib::{AppResult, AxisScale, Plotter};
 
-use crate::app::{Params, add_rabi_summaries};
+use crate::app::{Params, add_summaries};
 use crate::parallel::{WeightedOutput, try_average_velocity_samples};
 use crate::units::angular_gradient_to_per_mhz;
 
@@ -103,7 +103,7 @@ pub(super) fn plot(params: &mut Params) -> AppResult {
     plot.ylabel("|d(in-phase signal) / dΔ| (per MHz)");
     plot.xlim(0.0, params.gradient_harmonics as f64 + 0.5);
     plot.yscale(AxisScale::Log10);
-    add_rabi_summaries(&mut plot, &mts);
+    add_summaries(&mut plot, params, &mts);
     Ok(plot)
 }
 
@@ -149,6 +149,6 @@ pub(super) fn adjacent_plot(params: &mut Params) -> AppResult {
     plot.xlabel("Harmonic number k");
     plot.yscale(AxisScale::Log10);
     //plot.ylim(0.5, params.gradient_harmonics as f64 - 0.5);
-    add_rabi_summaries(&mut plot, &mts);
+    add_summaries(&mut plot, params, &mts);
     Ok(plot)
 }

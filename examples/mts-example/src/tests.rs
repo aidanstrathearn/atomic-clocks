@@ -28,10 +28,11 @@ fn default_experiment_matches_the_configured_physical_parameters() {
     let params = Params::default();
     let mts = params.mts_params().unwrap();
 
-    assert_eq!(params.experiment.cell.transition.wavelength_nm, 556.0);
+    assert_eq!(params.experiment.cell.atom.mass_u, 173.938_867_5);
+    assert_eq!(params.experiment.cell.atom.transition.wavelength_nm, 556.0);
     assert_eq!(params.experiment.pump.waist_radius_mm, 1.0);
     assert_eq!(params.experiment.probe.waist_radius_mm, 1.0);
-    assert_eq!(params.experiment.cell.density_per_m3, 1.0e18);
+    assert_eq!(params.experiment.cell.density_per_m3, 1.0e17);
     assert_eq!(params.experiment.cell.length_m, 0.02);
     assert_eq!(params.experiment.pump.power_milliwatts, 0.02);
     assert_eq!(params.experiment.probe.power_milliwatts, 0.02);
@@ -51,10 +52,26 @@ fn default_experiment_has_a_finite_nonzero_transmission_gain() {
 #[test]
 fn default_experiment_uses_the_fixed_transition() {
     let params = Params::default();
-    assert_eq!(params.experiment.cell.transition.wavelength_nm, 556.0);
-    assert_eq!(params.experiment.cell.transition.linewidth_hz, 182_000.0);
+    assert_eq!(params.experiment.cell.atom.transition.wavelength_nm, 556.0);
+    assert_eq!(
+        params.experiment.cell.atom.transition.linewidth_hz,
+        182_000.0
+    );
     assert_eq!(params.experiment.pump.wavelength_nm, 556.0);
     assert_eq!(params.experiment.probe.wavelength_nm, 556.0);
+}
+
+#[test]
+fn effective_temperature_uses_the_one_dimensional_velocity_variance() {
+    let mut params = Params::default();
+    let atom = params.experiment.cell.atom;
+    let velocity_sigma: f64 = 1.25;
+    params.velocity.sigma = velocity_sigma * TAU * params.experiment.time_scale.seconds_per_unit()
+        / atom.transition.wavelength_m();
+
+    let expected = atom.mass_kg() * velocity_sigma.powi(2)
+        / atomic_clocks::common::consts::BOLTZMANN_CONSTANT_J_PER_K;
+    assert_close(params.effective_temperature_kelvin(), expected, 1e-14);
 }
 
 #[test]

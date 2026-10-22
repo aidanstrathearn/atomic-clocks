@@ -79,7 +79,11 @@ impl MtsExperiment {
         if probe_intensity <= 0.0 {
             return Err("probe intensity must be positive for normalized readout".to_string());
         }
-        let probe_rabi = self.cell.transition.rabi_freq_radians_per_s(&self.probe);
+        let probe_rabi = self
+            .cell
+            .atom
+            .transition
+            .rabi_freq_radians_per_s(&self.probe);
         let optical_depth_per_coherence = 0.5
             * (probe_rabi / probe_intensity)
             * self.cell.density_per_m3
@@ -211,16 +215,19 @@ impl ProbeReadout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{Laser, Transition};
+    use crate::common::{Laser, Transition, TwoLevelAtom};
     use crate::vapourcell::{ModelTimeScale, MtsSolverParams, VapourCell};
 
     fn experiment() -> MtsExperiment {
         MtsExperiment {
             time_scale: ModelTimeScale::MICROSECONDS,
             cell: VapourCell {
-                transition: Transition {
-                    wavelength_nm: 780.24,
-                    linewidth_hz: 6.065e6,
+                atom: TwoLevelAtom {
+                    mass_u: 86.909_180_53,
+                    transition: Transition {
+                        wavelength_nm: 780.24,
+                        linewidth_hz: 6.065e6,
+                    },
                 },
                 density_per_m3: 2.5e16,
                 length_m: 0.075,
@@ -264,6 +271,7 @@ mod tests {
         let expected = 0.5
             * experiment
                 .cell
+                .atom
                 .transition
                 .rabi_freq_radians_per_s(&experiment.probe)
             / intensity
