@@ -1,5 +1,5 @@
 use atomic_clocks::twolevel::{
-    AffineChannel, BlochLiouvillian, BlochVec, Channel, ComposableChannel, Decay, Hamiltonian,
+    BlochLiouvillian, BlochStep, BlochVec, Channel, ComposableChannel, Decay, Hamiltonian,
     Liouvillian, Observable, PauliDephasingLiouvillian, Process, Vec3,
 };
 
@@ -43,12 +43,13 @@ fn assert_vec(actual: Vec3, expected: Vec3, tolerance: f64) {
 
 #[test]
 fn zero_duration_is_exactly_the_identity() {
-    let channel: AffineChannel = mixed_generator().for_duration(0.0);
+    let channel: BlochStep = mixed_generator().for_duration(0.0);
+    let affine = channel.to_affine();
     assert_eq!(
-        channel.linear().rows(),
+        affine.linear().rows(),
         &[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
     );
-    assert_vec(channel.shift(), state(0.0, 0.0, 0.0).r, 0.0);
+    assert_vec(affine.shift(), state(0.0, 0.0, 0.0).r, 0.0);
     for initial in initial_states() {
         assert_vec(channel.apply_to(initial).r, initial.r, 0.0);
     }
@@ -262,12 +263,12 @@ fn time_unit_rescaling_preserves_the_channel() {
 }
 
 #[test]
-fn affine_channels_compose_and_keep_traceless_propagation_separate_from_the_source() {
+fn prepared_steps_convert_to_affine_for_composition_and_keep_traceless_propagation_separate() {
     let generator = mixed_generator();
     let first = generator.for_duration(0.37);
     let second = generator.for_duration(0.83);
     let combined = generator.for_duration(1.2);
-    let composed = second.compose(&first);
+    let composed = second.to_affine().compose(&first.to_affine());
     for initial in initial_states() {
         let expected = combined.apply_to(initial);
         assert_vec(composed.apply_to(initial).r, expected.r, 1e-12);
@@ -276,7 +277,7 @@ fn affine_channels_compose_and_keep_traceless_propagation_separate_from_the_sour
             expected.r,
             1e-12,
         );
-        assert_vec(combined.to_affine().apply_to(initial).r, expected.r, 0.0);
+        assert_vec(combined.to_affine().apply_to(initial).r, expected.r, 1e-12);
     }
     let r = state(0.2, -0.3, 0.4).r;
     let observable = state(-0.5, 0.7, 0.1).r;
@@ -287,6 +288,83 @@ fn affine_channels_compose_and_keep_traceless_propagation_separate_from_the_sour
     let forward = observable.dot(traceless);
     let backward = combined.pull_back_traceless_observable(observable).dot(r);
     assert!((forward - backward).abs() < 1e-15);
+}
+
+#[test]
+fn direct_and_affine_forms_agree_for_states_traceless_vectors_and_observable_pullback() {
+    let mixed = mixed_generator();
+    let unitary = BlochLiouvillian {
+        gamma_up: 0.0,
+        gamma_down: 0.0,
+        gamma_x: 0.0,
+        gamma_y: 0.0,
+        gamma_z: 0.0,
+        ..mixed
+    };
+    let critical = BlochLiouvillian {
+        hamiltonian: Hamiltonian::new(1.0, 0.0, 0.0),
+        gamma_down: 4.0,
+        ..unitary
+    };
+    let singular = BlochLiouvillian {
+        hamiltonian: Hamiltonian::new(0.0, 0.0, 1.1),
+        gamma_z: 0.7,
+        ..unitary
+    };
+    let zero = BlochLiouvillian {
+        hamiltonian: Hamiltonian::default(),
+        ..unitary
+    };
+    for generator in [mixed, unitary, critical, singular, zero] {
+        for dt in [0.0, 1e-12, 0.025, 1.7, 100.0] {
+            let step = generator.for_duration(dt);
+            let affine = step.to_affine();
+            for initial in initial_states() {
+                assert_vec(step.apply_to(initial).r, affine.apply_to(initial).r, 1e-12);
+                assert_vec(
+                    step.apply_traceless(initial.r),
+                    affine.apply_traceless(initial.r),
+                    1e-12,
+                );
+                assert_vec(
+                    step.pull_back_traceless_observable(initial.r),
+                    affine.pull_back_traceless_observable(initial.r),
+                    1e-12,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn noncommuting_steps_compose_after_explicit_affine_conversion() {
+    let mixed = mixed_generator();
+    let unitary = BlochLiouvillian {
+        hamiltonian: Hamiltonian::new(-0.3, 0.8, 1.1),
+        gamma_up: 0.0,
+        gamma_down: 0.0,
+        gamma_x: 0.0,
+        gamma_y: 0.0,
+        gamma_z: 0.0,
+    };
+    let critical = BlochLiouvillian {
+        hamiltonian: Hamiltonian::new(1.0, 0.0, 0.0),
+        gamma_down: 4.0,
+        ..unitary
+    };
+    let steps = [
+        mixed.for_duration(0.37),
+        unitary.for_duration(0.2),
+        critical.for_duration(0.83),
+    ];
+    let composed = Process::new(steps.iter().map(Channel::to_affine)).compose();
+    for initial in initial_states() {
+        assert_vec(
+            Process::new(&steps).propagate_to_final(initial).r,
+            composed.apply_to(initial).r,
+            1e-12,
+        );
+    }
 }
 
 #[test]

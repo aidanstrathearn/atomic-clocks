@@ -3,7 +3,9 @@
 use crate::maths::Mat3;
 use crate::maths::complex::Complex;
 
-use crate::twolevel::{AffineChannel, BlochVec, Channel, ComposableChannel, Hamiltonian, Vec3};
+use crate::twolevel::{
+    AffineChannel, BlochVec, Channel, ComposableChannel, Hamiltonian, Unitary, Vec3,
+};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Decay {
@@ -73,9 +75,11 @@ impl Decay {
 ///     gamma_y: 0.0,
 ///     gamma_z: 0.05,
 /// };
-/// let channel = generator.for_duration(0.2);
-/// let state = channel.apply_to(BlochVec::ground());
+/// let step = generator.for_duration(0.2);
+/// let state = step.apply_to(BlochVec::ground());
 /// assert!((0.0..=1.0).contains(&state.excited_probability()));
+/// let affine = step.to_affine(); // Construct a matrix when composition is needed.
+/// assert!((affine.apply_to(BlochVec::ground()).r.z - state.r.z).abs() < 1e-12);
 /// ```
 #[derive(Copy, Clone)]
 pub struct BlochLiouvillian {
@@ -124,20 +128,22 @@ impl BlochLiouvillian {
         Ok(())
     }
 
-    /// Prepares the affine channel for evolution under this constant generator.
+    /// Prepares direct evolution under this constant generator.
     ///
     /// Uses a Cayley-Hamilton polynomial when the eigenvalues and spectral
     /// projectors are well conditioned. Short source integrals use a vector
     /// series; longer ones use the same spectral projectors as the linear map.
     /// Falls back to the augmented matrix exponential for ill-conditioned cases.
     /// Neither path requires a steady-state inverse; zero rates, singular
-    /// generators, and repeated eigenvalues are supported.
+    /// generators, and repeated eigenvalues are supported. The Cayley-Hamilton
+    /// and unitary paths apply directly to vectors. Construct their matrices
+    /// explicitly with [`Channel::to_affine`] when needed for composition.
     ///
     /// # Panics
     ///
     /// Panics for invalid generator parameters or a nonfinite or negative
     /// duration. A zero duration returns the identity channel.
-    pub fn for_duration(&self, dt: f64) -> AffineChannel {
+    pub fn for_duration(&self, dt: f64) -> BlochStep {
         self.validate()
             .unwrap_or_else(|message| panic!("{message}"));
         assert!(
@@ -145,17 +151,23 @@ impl BlochLiouvillian {
             "evolution duration must be nonnegative and finite"
         );
         if dt == 0.0 {
-            return AffineChannel::identity();
+            return BlochStep {
+                kind: BlochStepKind::Unitary(Unitary::identity()),
+            };
         }
 
         let h = self.hamiltonian.r;
         let d = self.damping();
         if d.x == 0.0 && d.y == 0.0 && d.z == 0.0 && (h * dt).norm_square().is_normal() {
-            return self.hamiltonian.for_duration(dt).to_affine();
+            return BlochStep {
+                kind: BlochStepKind::Unitary(self.hamiltonian.for_duration(dt)),
+            };
         }
         let source_z = self.gamma_up - self.gamma_down;
-        if let Some(channel) = cayley_affine_step(h, d, source_z, dt) {
-            return channel;
+        if let Some(step) = prepare_cayley_step(h, d, source_z, dt) {
+            return BlochStep {
+                kind: BlochStepKind::Cayley(step),
+            };
         }
         let generator = Mat3::from_rows([[-d.x, -h.z, h.y], [h.z, -d.y, -h.x], [-h.y, h.x, -d.z]]);
         let source = Vec3 {
@@ -163,7 +175,9 @@ impl BlochLiouvillian {
             y: 0.0,
             z: source_z,
         };
-        affine_generator_exp(generator, source, dt)
+        BlochStep {
+            kind: BlochStepKind::Affine(affine_generator_exp(generator, source, dt)),
+        }
     }
 
     fn damping(self) -> Vec3 {
@@ -176,9 +190,115 @@ impl BlochLiouvillian {
     }
 }
 
+/// Prepared evolution over one interval of a constant [`BlochLiouvillian`].
+///
+/// Applies the Cayley-Hamilton polynomial directly to vectors, or uses the
+/// analytic unitary representation when dissipation is zero. Only the numerical
+/// fallback stores a full affine matrix. Convert with [`Channel::to_affine`] to
+/// compose steps or to reuse a matrix across many state applications.
+#[derive(Copy, Clone)]
+pub struct BlochStep {
+    kind: BlochStepKind,
+}
+
+#[derive(Copy, Clone)]
+enum BlochStepKind {
+    Unitary(Unitary),
+    Cayley(CayleyBlochStep),
+    Affine(AffineChannel),
+}
+
+impl Channel for BlochStep {
+    #[inline]
+    fn apply_to(&self, state: BlochVec) -> BlochVec {
+        match &self.kind {
+            BlochStepKind::Unitary(step) => step.apply_to(state),
+            BlochStepKind::Cayley(step) => step.apply_to(state),
+            BlochStepKind::Affine(step) => step.apply_to(state),
+        }
+    }
+
+    #[inline]
+    fn apply_traceless(&self, r: Vec3) -> Vec3 {
+        match &self.kind {
+            BlochStepKind::Unitary(step) => step.apply_traceless(r),
+            BlochStepKind::Cayley(step) => step.apply_traceless(r),
+            BlochStepKind::Affine(step) => step.apply_traceless(r),
+        }
+    }
+
+    #[inline]
+    fn pull_back_traceless_observable(&self, o: Vec3) -> Vec3 {
+        match &self.kind {
+            BlochStepKind::Unitary(step) => step.pull_back_traceless_observable(o),
+            BlochStepKind::Cayley(step) => step.pull_back_traceless_observable(o),
+            BlochStepKind::Affine(step) => step.pull_back_traceless_observable(o),
+        }
+    }
+
+    #[inline]
+    fn to_affine(&self) -> AffineChannel {
+        match &self.kind {
+            BlochStepKind::Unitary(step) => step.to_affine(),
+            BlochStepKind::Cayley(step) => step.to_affine(),
+            BlochStepKind::Affine(step) => *step,
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct CayleyBlochStep {
+    hamiltonian: Vec3,
+    damping: Vec3,
+    coefficients: [f64; 3],
+    shift: Vec3,
+}
+
+impl Channel for CayleyBlochStep {
+    #[inline]
+    fn apply_to(&self, state: BlochVec) -> BlochVec {
+        BlochVec {
+            r: self.apply_traceless(state.r) + self.shift,
+        }
+    }
+
+    #[inline]
+    fn apply_traceless(&self, r: Vec3) -> Vec3 {
+        let ar = apply_bloch_generator(self.hamiltonian, self.damping, r);
+        let a2r = apply_bloch_generator(self.hamiltonian, self.damping, ar);
+        let [c0, c1, c2] = self.coefficients;
+        c0 * r + c1 * ar + c2 * a2r
+    }
+
+    #[inline]
+    fn pull_back_traceless_observable(&self, o: Vec3) -> Vec3 {
+        // Transposing reverses the cross product and preserves the damping.
+        let transposed_h = self.hamiltonian * -1.0;
+        let ao = apply_bloch_generator(transposed_h, self.damping, o);
+        let a2o = apply_bloch_generator(transposed_h, self.damping, ao);
+        let [c0, c1, c2] = self.coefficients;
+        c0 * o + c1 * ao + c2 * a2o
+    }
+
+    #[inline]
+    fn to_affine(&self) -> AffineChannel {
+        let h = self.hamiltonian;
+        let d = self.damping;
+        let generator = Mat3::from_rows([[-d.x, -h.z, h.y], [h.z, -d.y, -h.x], [-h.y, h.x, -d.z]]);
+        let [c0, c1, c2] = self.coefficients;
+        let linear = c0 * Mat3::identity() + c1 * generator + c2 * (generator * generator);
+        AffineChannel::new(linear, self.shift)
+    }
+}
+
+#[inline]
+fn apply_bloch_generator(h: Vec3, d: Vec3, r: Vec3) -> Vec3 {
+    h.cross(r) - d.circ(r)
+}
+
 /// Evaluate exp(A t) as a degree-two polynomial, with stable source integration.
 /// Normalizing the generator keeps the cubic coefficients independent of units.
-fn cayley_affine_step(h: Vec3, d: Vec3, source_z: f64, dt: f64) -> Option<AffineChannel> {
+fn prepare_cayley_step(h: Vec3, d: Vec3, source_z: f64, dt: f64) -> Option<CayleyBlochStep> {
     let scale = [h.x.abs(), h.y.abs(), h.z.abs(), d.x, d.y, d.z]
         .into_iter()
         .fold(0.0_f64, f64::max);
@@ -265,10 +385,6 @@ fn cayley_affine_step(h: Vec3, d: Vec3, source_z: f64, dt: f64) -> Option<Affine
         return None;
     }
 
-    let generator = Mat3::from_rows([[-d.x, -h.z, h.y], [h.z, -d.y, -h.x], [-h.y, h.x, -d.z]]);
-    let squared = generator * generator;
-    let [c0, c1, c2] = coefficients;
-    let linear = c0 * Mat3::identity() + c1 * generator + c2 * squared;
     let source = Vec3 {
         x: 0.0,
         y: 0.0,
@@ -277,22 +393,29 @@ fn cayley_affine_step(h: Vec3, d: Vec3, source_z: f64, dt: f64) -> Option<Affine
     let shift = if source_z == 0.0 {
         source
     } else if use_source_series {
-        integrated_source_series(generator, source, time)
+        integrated_source_series(h, d, source, time)
     } else {
         let [q0, q1, q2] = integral;
-        q0 * source + q1 * generator.apply_to_vec(source) + q2 * squared.apply_to_vec(source)
+        let a_source = apply_bloch_generator(h, d, source);
+        let a2_source = apply_bloch_generator(h, d, a_source);
+        q0 * source + q1 * a_source + q2 * a2_source
     };
-    Some(AffineChannel::new(linear, shift))
+    Some(CayleyBlochStep {
+        hamiltonian: h,
+        damping: d,
+        coefficients,
+        shift,
+    })
 }
 
 /// For short intervals, integrating one vector costs less than preparing three
 /// spectral integrals. The generator norm times time is at most 0.5 here.
-fn integrated_source_series(generator: Mat3, source: Vec3, time: f64) -> Vec3 {
+fn integrated_source_series(h: Vec3, d: Vec3, source: Vec3, time: f64) -> Vec3 {
     let mut term = source * time;
     let mut sum = term;
     let norm = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
     for order in 2..=32 {
-        term = generator.apply_to_vec(term) * (time / order as f64);
+        term = apply_bloch_generator(h, d, term) * (time / order as f64);
         sum = sum + term;
         if norm(term) <= f64::EPSILON * norm(sum) {
             break;
@@ -779,8 +902,9 @@ mod bloch_cayley_tests {
         )
     }
 
-    fn assert_channel(actual: AffineChannel, expected: AffineChannel) {
-        for (a, e) in actual
+    fn assert_channel(actual: impl Channel, expected: AffineChannel) {
+        let affine = actual.to_affine();
+        for (a, e) in affine
             .linear()
             .rows()
             .iter()
@@ -789,11 +913,88 @@ mod bloch_cayley_tests {
         {
             assert!((a - e).abs() < 1e-11, "{a} != {e}");
         }
-        let a = actual.shift();
+        let a = affine.shift();
         let e = expected.shift();
         for (a, e) in [a.x, a.y, a.z].into_iter().zip([e.x, e.y, e.z]) {
             assert!((a - e).abs() < 1e-11, "{a} != {e}");
         }
+        for r in [
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            Vec3 {
+                x: 0.2,
+                y: -0.3,
+                z: 0.4,
+            },
+        ] {
+            for (direct, matrix) in [
+                (
+                    actual.apply_to(BlochVec { r }).r,
+                    expected.apply_to(BlochVec { r }).r,
+                ),
+                (actual.apply_traceless(r), expected.apply_traceless(r)),
+                (
+                    actual.pull_back_traceless_observable(r),
+                    expected.pull_back_traceless_observable(r),
+                ),
+            ] {
+                for (a, e) in [direct.x, direct.y, direct.z]
+                    .into_iter()
+                    .zip([matrix.x, matrix.y, matrix.z])
+                {
+                    assert!((a - e).abs() < 1e-11, "{a} != {e}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn prepared_steps_keep_the_direct_representations_and_affine_fallback() {
+        let model = BlochLiouvillian {
+            hamiltonian: Hamiltonian::new(1.3, -0.4, 0.7),
+            gamma_up: 0.2,
+            gamma_down: 0.8,
+            gamma_x: 0.35,
+            gamma_y: 0.2,
+            gamma_z: 0.3,
+        };
+        assert!(matches!(
+            model.for_duration(0.025).kind,
+            BlochStepKind::Cayley(_)
+        ));
+        assert!(matches!(
+            model.for_duration(0.0).kind,
+            BlochStepKind::Unitary(_)
+        ));
+        let unitary = BlochLiouvillian {
+            gamma_up: 0.0,
+            gamma_down: 0.0,
+            gamma_x: 0.0,
+            gamma_y: 0.0,
+            gamma_z: 0.0,
+            ..model
+        };
+        assert!(matches!(
+            unitary.for_duration(0.025).kind,
+            BlochStepKind::Unitary(_)
+        ));
+        let critical = BlochLiouvillian {
+            hamiltonian: Hamiltonian::new(1.0, 0.0, 0.0),
+            gamma_down: 4.0,
+            ..unitary
+        };
+        assert!(matches!(
+            critical.for_duration(0.025).kind,
+            BlochStepKind::Affine(_)
+        ));
     }
 
     #[test]
@@ -820,7 +1021,7 @@ mod bloch_cayley_tests {
                         let d = model.damping();
                         let source = gamma_up - gamma_down;
                         for dt in [1e-12, 1e-6, 0.025, 0.2, 1.7, 10.0, 100.0] {
-                            if let Some(actual) = cayley_affine_step(h, d, source, dt) {
+                            if let Some(actual) = prepare_cayley_step(h, d, source, dt) {
                                 accepted += 1;
                                 assert_channel(actual, reference(h, d, source, dt));
                             }
@@ -847,7 +1048,7 @@ mod bloch_cayley_tests {
                 gamma_z: 0.0,
             };
             assert!(
-                cayley_affine_step(
+                prepare_cayley_step(
                     model.hamiltonian.r,
                     model.damping(),
                     -model.gamma_down,
@@ -871,7 +1072,7 @@ mod bloch_cayley_tests {
             z: 0.0,
         };
         for dt in [1e-12, 0.025, 1.0, 1e6] {
-            let channel = cayley_affine_step(h, d, 0.0, dt).expect("separated eigenvalues");
+            let channel = prepare_cayley_step(h, d, 0.0, dt).expect("separated eigenvalues");
             let result = channel.apply_to(BlochVec::excited());
             assert!((result.r.z - 1.0).abs() < 1e-14);
             assert!(result.r.x.abs() < 1e-14 && result.r.y.abs() < 1e-14);

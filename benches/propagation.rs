@@ -88,6 +88,21 @@ fn constant_generator_preparation(c: &mut Criterion) {
         gamma_y: 0.0,
         gamma_z: 0.0,
     };
+    let unitary = BlochLiouvillian {
+        gamma_up: 0.0,
+        gamma_down: 0.0,
+        gamma_x: 0.0,
+        gamma_y: 0.0,
+        gamma_z: 0.0,
+        ..bloch
+    };
+    let models = [
+        ("bloch_decay", bloch),
+        ("bloch_pauli", pauli),
+        ("bloch_decay_pauli", combined),
+        ("bloch_critical", critical),
+        ("bloch_unitary", unitary),
+    ];
 
     // Each case prepares the same affine representation, including its source.
     // This small interval is representative of a sampled noise trajectory.
@@ -101,9 +116,6 @@ fn constant_generator_preparation(c: &mut Criterion) {
             )
         });
     });
-    group.bench_function("bloch_decay", |b| {
-        b.iter(|| black_box(black_box(bloch).for_duration(black_box(0.025))));
-    });
     group.bench_function("legacy_pauli", |b| {
         b.iter(|| {
             black_box(
@@ -113,15 +125,25 @@ fn constant_generator_preparation(c: &mut Criterion) {
             )
         });
     });
-    group.bench_function("bloch_pauli", |b| {
-        b.iter(|| black_box(black_box(pauli).for_duration(black_box(0.025))));
-    });
-    group.bench_function("bloch_decay_pauli", |b| {
-        b.iter(|| black_box(black_box(combined).for_duration(black_box(0.025))));
-    });
-    group.bench_function("bloch_critical", |b| {
-        b.iter(|| black_box(black_box(critical).for_duration(black_box(0.025))));
-    });
+    for (name, generator) in models {
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(
+                    black_box(generator)
+                        .for_duration(black_box(0.025))
+                        .to_affine(),
+                )
+            });
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("constant_generator_direct_preparation");
+    for (name, generator) in models {
+        group.bench_function(name, |b| {
+            b.iter(|| black_box(black_box(generator).for_duration(black_box(0.025))));
+        });
+    }
     group.finish();
 
     // Include one state update and let the legacy step apply directly, without
@@ -146,12 +168,7 @@ fn constant_generator_preparation(c: &mut Criterion) {
             )
         });
     });
-    for (name, generator) in [
-        ("bloch_decay", bloch),
-        ("bloch_pauli", pauli),
-        ("bloch_decay_pauli", combined),
-        ("bloch_critical", critical),
-    ] {
+    for (name, generator) in models {
         group.bench_function(name, |b| {
             b.iter(|| {
                 black_box(
@@ -160,6 +177,31 @@ fn constant_generator_preparation(c: &mut Criterion) {
                         .apply_to(black_box(initial)),
                 )
             });
+        });
+        group.bench_function(format!("{name}_via_affine"), |b| {
+            b.iter(|| {
+                black_box(
+                    black_box(generator)
+                        .for_duration(black_box(0.025))
+                        .to_affine()
+                        .apply_to(black_box(initial)),
+                )
+            });
+        });
+    }
+    group.finish();
+
+    // Reusing a prepared step isolates the cost of direct polynomial evaluation
+    // versus applying a matrix prepared once outside the measured loop.
+    let mut group = c.benchmark_group("constant_generator_application");
+    for (name, generator) in models {
+        let step = generator.for_duration(0.025);
+        let affine = step.to_affine();
+        group.bench_function(format!("{name}_direct"), |b| {
+            b.iter(|| black_box(black_box(&step).apply_to(black_box(initial))));
+        });
+        group.bench_function(format!("{name}_affine"), |b| {
+            b.iter(|| black_box(black_box(&affine).apply_to(black_box(initial))));
         });
     }
     group.finish();
