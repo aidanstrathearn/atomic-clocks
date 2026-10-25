@@ -8,8 +8,8 @@ mod state;
 pub use crate::maths::vec3::Vec3;
 pub use channel::{AffineChannel, Channel, ComposableChannel};
 pub use evolution::{
-    Decay, DephasingLiouvillian, DephasingStep, DissipativeStep, Hamiltonian, Liouvillian,
-    PauliDephasingLiouvillian, TimeDependentHamiltonian, TrotterConfig, Unitary,
+    BlochLiouvillian, Decay, DephasingLiouvillian, DephasingStep, DissipativeStep, Hamiltonian,
+    Liouvillian, PauliDephasingLiouvillian, TimeDependentHamiltonian, TrotterConfig, Unitary,
 };
 pub use observable::Observable;
 pub use process::{ChannelPair, Process, steps};
