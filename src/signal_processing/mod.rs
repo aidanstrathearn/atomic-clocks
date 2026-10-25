@@ -1,10 +1,11 @@
-//! Scalar LTI transfer functions and one-sided power spectral densities.
+//! Scalar LTI transfer functions, one-sided PSDs, and stochastic processes.
 
 mod adev;
 mod error;
 mod feedback;
 mod frequency;
 mod psd;
+pub mod stochastic;
 mod transfer;
 
 pub use adev::AdevSamples;
