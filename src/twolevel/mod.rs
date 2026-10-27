@@ -15,3 +15,5 @@ pub use evolution::{
 pub use observable::Observable;
 pub use process::{ChannelPair, Process, steps};
 pub use state::BlochVec;
+
+pub mod pulse_sequence;
