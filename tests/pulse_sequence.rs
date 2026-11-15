@@ -334,6 +334,49 @@ fn zero_target_duration_is_the_identity_with_detuning_and_dephasing() {
 }
 
 #[test]
+fn ramsey_pair_final_phase_matches_a_directly_phased_second_pulse() {
+    let duration_s = 310.0e-6;
+    let dark_duration_s = 73.0e-6;
+    let phase_rad: f64 = 0.73;
+    let mut initial = BlochVec::ground();
+    initial.r.x = 0.24;
+    initial.r.y = -0.31;
+    initial.r.z = 0.42;
+
+    for gamma_phi in [0.0, PI * 1_300.0] {
+        let parameters = PulseParameters {
+            rabi_angular_frequency: TAU * 1_900.0,
+            detuning_angular_frequency: TAU * 4_700.0,
+            gamma_x: 0.0,
+            gamma_phi,
+        };
+        let evolve = |state, phase: f64| {
+            DephasingLiouvillian {
+                hamiltonian: Hamiltonian::new(
+                    parameters.rabi_angular_frequency * phase.cos(),
+                    parameters.rabi_angular_frequency * phase.sin(),
+                    parameters.detuning_angular_frequency,
+                ),
+                gamma_phi,
+            }
+            .for_duration(0.5 * duration_s)
+            .apply_to(state)
+        };
+        let after_first = evolve(initial, 0.0);
+        let after_dark = Hamiltonian::new(0.0, 0.0, parameters.detuning_angular_frequency)
+            .for_duration(dark_duration_s)
+            .apply_to(after_first)
+            .dephase((-gamma_phi * dark_duration_s).exp());
+        let expected = evolve(after_dark, phase_rad);
+        let actual = RamseyPair::new(duration_s, dark_duration_s)
+            .with_final_pulse_phase(phase_rad)
+            .apply_to(parameters, initial);
+
+        assert_state_close(actual, expected, 1.0e-12);
+    }
+}
+
+#[test]
 fn zero_dark_time_ramsey_pair_matches_one_full_duration_pulse() {
     let parameters = PulseParameters {
         rabi_angular_frequency: TAU * 1_900.0,

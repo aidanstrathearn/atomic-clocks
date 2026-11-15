@@ -8,6 +8,7 @@ use super::{PulseParameters, ResolvedPulseSequence, prepare_pulse};
 pub struct RamseyPair {
     pulse_duration_s: f64,
     dark_duration_s: f64,
+    final_pulse_phase_rad: f64,
 }
 
 impl RamseyPair {
@@ -17,13 +18,21 @@ impl RamseyPair {
         Self {
             pulse_duration_s: 0.5 * pair_duration_s,
             dark_duration_s,
+            final_pulse_phase_rad: 0.0,
         }
+    }
+
+    /// Set the phase of the second pulse relative to the first, in radians.
+    #[must_use]
+    pub fn with_final_pulse_phase(mut self, phase_rad: f64) -> Self {
+        self.final_pulse_phase_rad = phase_rad;
+        self
     }
 }
 
 impl ResolvedPulseSequence for RamseyPair {
     fn apply_to(&self, parameters: PulseParameters, initial: BlochVec) -> BlochVec {
-        if self.dark_duration_s == 0.0 {
+        if self.dark_duration_s == 0.0 && self.final_pulse_phase_rad == 0.0 {
             return prepare_pulse(parameters, 2.0 * self.pulse_duration_s).apply_to(initial);
         }
 
@@ -34,6 +43,6 @@ impl ResolvedPulseSequence for RamseyPair {
             parameters.detuning_angular_frequency * self.dark_duration_s,
             (-parameters.gamma_phi * self.dark_duration_s).exp(),
         );
-        pulse.apply_to(after_dark_time)
+        pulse.apply_to_with_phase(after_dark_time, self.final_pulse_phase_rad)
     }
 }
