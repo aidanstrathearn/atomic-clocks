@@ -172,6 +172,7 @@ mod tests {
                     transition: Transition {
                         wavelength_nm: 780.24,
                         linewidth_hz: 6.065e6,
+                        clebsch_gordan_squared: 1.0,
                     },
                 },
                 density_per_m3: 2.5e16,

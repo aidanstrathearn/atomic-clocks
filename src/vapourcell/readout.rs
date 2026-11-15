@@ -73,6 +73,7 @@ impl MtsExperiment {
     /// The Rabi frequency is evaluated in radians per second, independently of
     /// the experiment's model-time scale. A positive probe intensity is needed
     /// because normalized transmission is undefined without incident light.
+    /// The transition's CG factor is included here as well as in the drive.
     pub fn probe_readout(&self) -> Result<ProbeReadout, String> {
         self.validate()?;
         let probe_intensity = self.probe.intensity_watts_per_m2();
@@ -227,6 +228,7 @@ mod tests {
                     transition: Transition {
                         wavelength_nm: 780.24,
                         linewidth_hz: 6.065e6,
+                        clebsch_gordan_squared: 1.0,
                     },
                 },
                 density_per_m3: 2.5e16,
@@ -290,6 +292,45 @@ mod tests {
                 .optical_depth_per_coherence(),
             readout.optical_depth_per_coherence()
         );
+    }
+
+    #[test]
+    fn component_factor_scales_both_mts_drives_and_readout_without_changing_decay() {
+        let reference = experiment();
+        let reference_params = reference.to_mts_params(MtsSolverParams::default()).unwrap();
+        let reference_readout = reference
+            .probe_readout()
+            .unwrap()
+            .optical_depth_per_coherence();
+        for coefficient in [0.0_f64, 1.0 / 3.0, 2.0 / 3.0, 1.0] {
+            let mut component = reference;
+            component.cell.atom.transition.clebsch_gordan_squared = coefficient;
+            let params = component.to_mts_params(MtsSolverParams::default()).unwrap();
+            let factor = coefficient.sqrt();
+            assert_close(
+                params.atom.hamiltonian.r_pump,
+                reference_params.atom.hamiltonian.r_pump * factor,
+            );
+            assert_close(
+                params.atom.hamiltonian.r_prbe,
+                reference_params.atom.hamiltonian.r_prbe * factor,
+            );
+            assert_close(
+                component
+                    .probe_readout()
+                    .unwrap()
+                    .optical_depth_per_coherence(),
+                reference_readout * factor,
+            );
+            assert_eq!(
+                params.atom.decay.gamma_down,
+                reference_params.atom.decay.gamma_down
+            );
+            assert_eq!(
+                params.atom.decay.gamma_phi,
+                reference_params.atom.decay.gamma_phi
+            );
+        }
     }
 
     #[test]

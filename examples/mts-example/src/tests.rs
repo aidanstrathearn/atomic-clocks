@@ -50,6 +50,56 @@ fn default_experiment_has_a_finite_nonzero_transmission_gain() {
 }
 
 #[test]
+fn green_coupling_and_transmission_preserve_the_physical_baseline() {
+    let mut params = Params::default();
+    let mts = params.mts_params().unwrap();
+    // Captured with the original unit-coupling 174Yb transition.
+    assert_eq!(
+        params
+            .experiment
+            .cell
+            .atom
+            .transition
+            .clebsch_gordan_squared,
+        1.0
+    );
+    assert_close(mts.atom.hamiltonian.r_pump, 2.452_591_404_428_935_6, 1e-14);
+    assert_close(mts.atom.hamiltonian.r_prbe, 2.452_591_404_428_935_6, 1e-14);
+    assert_close(
+        params.transmission_gain().unwrap(),
+        -68.820_373_297_891_78,
+        1e-12,
+    );
+
+    // Use a thin cell and a short single-velocity scan for the signal baseline.
+    params.experiment.cell.density_per_m3 = 1e15;
+    params.experiment.scan_half_range = 1.0 / TAU;
+    params.experiment.scan_samples = 3;
+    params.solver = MtsSolverParams {
+        kr_n: 3,
+        steps_per_period: 40,
+        n_periods: 2,
+    };
+    let raw = demod_at_velocity(&params, 0.0, [0, 1]);
+    let gain = params.transmission_gain().unwrap();
+    assert_close(
+        1.0 + 0.5 * gain * raw.values[2][0].in_phase,
+        0.903_584_239_941_452,
+        1e-12,
+    );
+    assert_close(
+        gain * raw.values[2][1].in_phase,
+        0.002_372_445_667_118_313,
+        1e-12,
+    );
+    assert_close(
+        gain * raw.values[2][1].quadrature,
+        0.004_562_255_533_278_112,
+        1e-12,
+    );
+}
+
+#[test]
 fn default_experiment_uses_the_fixed_transition() {
     let params = Params::default();
     assert_eq!(params.experiment.cell.atom.transition.wavelength_nm, 556.0);
