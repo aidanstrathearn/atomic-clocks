@@ -114,6 +114,60 @@ pub struct CombMode {
 }
 
 impl Comb {
+    /// Creates an equal-amplitude Schroeder comb centered on the carrier.
+    ///
+    /// `side_modes` is the number of teeth on each side of the carrier, giving
+    /// `M = 2 * side_modes + 1` modes in ascending index order from `-side_modes`
+    /// through `+side_modes`. Zero side modes produces only the carrier.
+    ///
+    /// Every tooth has relative amplitude `1.0`, so each receives `1 / M` of the
+    /// laser's total power. For the ordinal `n = index + side_modes + 1`, phases
+    /// are `-pi * n * (n - 1) / M` radians at `t = 0`. Phases are not wrapped or
+    /// shifted to set the carrier phase to zero.
+    ///
+    /// Returns an error for invalid laser or spacing parameters, unrepresentable
+    /// tooth indices, mode counts or offsets, or a failed mode allocation.
+    pub fn schroeder(laser: Laser, spacing_hz: f64, side_modes: usize) -> Result<Self, String> {
+        laser.validate_as("comb laser")?;
+        if !spacing_hz.is_finite() || spacing_hz <= 0.0 {
+            return Err("comb spacing must be positive and finite".to_string());
+        }
+        let side_index = i32::try_from(side_modes)
+            .map_err(|_| "Schroeder side mode count must fit in an i32".to_string())?;
+        let mode_count = side_modes
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| "Schroeder mode count is too large".to_string())?;
+        if !(f64::from(side_index) * spacing_hz).is_finite() {
+            return Err("Schroeder mode frequency offsets must be finite".to_string());
+        }
+
+        let mut modes = Vec::new();
+        modes
+            .try_reserve_exact(mode_count)
+            .map_err(|error| format!("cannot allocate Schroeder comb modes: {error}"))?;
+        modes.extend(
+            (-side_index..=side_index)
+                .enumerate()
+                .map(|(ordinal, index)| {
+                    let n = ordinal as f64 + 1.0;
+                    CombMode {
+                        index,
+                        amplitude: 1.0,
+                        phase_rad: -PI * n * (n - 1.0) / mode_count as f64,
+                    }
+                }),
+        );
+
+        let comb = Self {
+            laser,
+            spacing_hz,
+            modes,
+        };
+        comb.validate()?;
+        Ok(comb)
+    }
+
     /// Checks the laser, spacing, unique indices, finite offsets and phases,
     /// and nonnegative finite amplitudes with at least one nonzero weight.
     pub fn validate(&self) -> Result<(), String> {

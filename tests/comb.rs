@@ -51,6 +51,102 @@ fn assert_invalid_comb(comb: &Comb) {
 }
 
 #[test]
+fn schroeder_comb_centers_the_teeth_and_uses_ordinals_for_unwrapped_phases() {
+    let comb = Comb::schroeder(comb().laser, 1_000.0, 2).unwrap();
+    assert_eq!(comb.modes.len(), 5);
+    assert_eq!(
+        comb.mode_offsets_hz().unwrap(),
+        [-2_000.0, -1_000.0, 0.0, 1_000.0, 2_000.0]
+    );
+    for ((mode, index), phase_in_pi) in comb
+        .modes
+        .iter()
+        .zip([-2, -1, 0, 1, 2])
+        .zip([0.0, -0.4, -1.2, -2.4, -4.0])
+    {
+        assert_eq!(mode.index, index);
+        assert_eq!(mode.amplitude, 1.0);
+        assert_close(mode.phase_rad, phase_in_pi * PI, 2e-15);
+    }
+}
+
+#[test]
+fn schroeder_comb_distributes_power_and_preserves_phases_in_rabi_couplings() {
+    let transition = YB171_CLOCK.transition;
+    for side_modes in [0, 1, 3, 8] {
+        for power_milliwatts in [0.0, 5.0] {
+            let laser = Laser {
+                power_milliwatts,
+                ..comb().laser
+            };
+            let comb = Comb::schroeder(laser, 2_500.0, side_modes).unwrap();
+            let mode_count = 2 * side_modes + 1;
+            assert_eq!(comb.modes.len(), mode_count);
+            assert_eq!(comb.modes[side_modes].index, 0);
+            let expected_rabi =
+                transition.rabi_freq_radians_per_s(&laser) / (mode_count as f64).sqrt();
+            for ((resolved, mode), power) in transition
+                .comb_rabi_freqs(&comb)
+                .unwrap()
+                .iter()
+                .zip(&comb.modes)
+                .zip(comb.mode_powers_milliwatts().unwrap())
+            {
+                assert_close(power, power_milliwatts / mode_count as f64, 2e-15);
+                assert_close(resolved.rabi_angular_frequency, expected_rabi, 2e-15);
+                assert_eq!(resolved.index, mode.index);
+                assert_eq!(resolved.phase_rad, mode.phase_rad);
+            }
+        }
+    }
+}
+
+#[test]
+fn schroeder_comb_with_zero_side_modes_matches_a_single_carrier() {
+    let laser = Laser {
+        linewidth_fwhm_hz: 0.0,
+        ..comb().laser
+    };
+    let comb = Comb::schroeder(laser, 1_000.0, 0).unwrap();
+    assert_eq!(comb.modes.len(), 1);
+    assert_eq!(comb.modes[0].index, 0);
+    assert_eq!(comb.modes[0].phase_rad, 0.0);
+    assert_eq!(
+        comb.mode_powers_milliwatts().unwrap(),
+        [laser.power_milliwatts]
+    );
+    let transition = YB171_CLOCK.transition;
+    assert_eq!(
+        transition.comb_rabi_freqs(&comb).unwrap()[0].rabi_angular_frequency,
+        transition.rabi_freq_radians_per_s(&laser)
+    );
+}
+
+#[test]
+fn schroeder_constructor_rejects_unrepresentable_counts_and_invalid_parameters() {
+    let laser = comb().laser;
+    for side_modes in [i32::MAX as usize + 1, usize::MAX] {
+        assert!(Comb::schroeder(laser, 1_000.0, side_modes).is_err());
+    }
+    for spacing in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::MAX] {
+        assert!(Comb::schroeder(laser, spacing, 2).is_err());
+    }
+    // Reject invalid endpoints before attempting an enormous mode allocation.
+    assert!(Comb::schroeder(laser, f64::MAX, i32::MAX as usize).is_err());
+    assert!(
+        Comb::schroeder(
+            Laser {
+                waist_radius_mm: 0.0,
+                ..laser
+            },
+            1_000.0,
+            1
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn discrete_modes_preserve_order_and_distribute_total_power_by_squared_weights() {
     let comb = comb();
     assert_eq!(comb.mode_offsets_hz().unwrap(), [2_000.0, -3_000.0, 0.0]);
