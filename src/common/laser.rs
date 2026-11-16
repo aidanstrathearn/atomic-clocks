@@ -1,4 +1,5 @@
 use super::consts::{PLANCK_CONSTANT_J_S, SPEED_OF_LIGHT};
+use std::collections::HashSet;
 use std::f64::consts::PI;
 
 #[derive(Clone, Copy, Debug)]
@@ -77,6 +78,186 @@ impl Laser {
             ));
         }
         Ok(())
+    }
+}
+
+/// A finite set of equally spaced optical modes sharing a Gaussian beam waist.
+///
+/// The embedded laser's power is the total time-averaged power across the
+/// represented modes. Relative field amplitudes are normalized when calculating
+/// powers or couplings; their squared magnitudes determine the power fractions.
+/// Removing modes and recalculating therefore redistributes the total power.
+///
+/// Frequencies are offsets from the reference tooth at index zero, which need
+/// not be present. As with [`Laser`], wavelength is not used to infer an atomic
+/// detuning. All teeth inherit the laser's Lorentzian linewidth; this describes
+/// an ideal comb with shared laser phase noise and noiseless spacing, without
+/// specifying a stochastic noise realization.
+#[derive(Clone, Debug)]
+pub struct Comb {
+    pub laser: Laser,
+    /// Positive ordinary-frequency spacing between adjacent tooth indices, in Hz.
+    pub spacing_hz: f64,
+    /// Modes in the order used by the power, spectrum, and coupling calculations.
+    pub modes: Vec<CombMode>,
+}
+
+/// One tooth of a [`Comb`], relative to the same optical reference as every tooth.
+#[derive(Clone, Copy, Debug)]
+pub struct CombMode {
+    /// Signed tooth number; its frequency offset is `index * comb.spacing_hz`.
+    pub index: i32,
+    /// Nonnegative relative field-amplitude weight, not a power fraction.
+    pub amplitude: f64,
+    /// Field phase at `t = 0`, in radians. Any finite phase is accepted.
+    pub phase_rad: f64,
+}
+
+impl Comb {
+    /// Checks the laser, spacing, unique indices, finite offsets and phases,
+    /// and nonnegative finite amplitudes with at least one nonzero weight.
+    pub fn validate(&self) -> Result<(), String> {
+        self.laser.validate_as("comb laser")?;
+        if !self.spacing_hz.is_finite() || self.spacing_hz <= 0.0 {
+            return Err("comb spacing must be positive and finite".to_string());
+        }
+        if self.modes.is_empty() {
+            return Err("comb must contain at least one mode".to_string());
+        }
+
+        let mut indices = HashSet::with_capacity(self.modes.len());
+        let mut has_nonzero_amplitude = false;
+        for mode in &self.modes {
+            if !indices.insert(mode.index) {
+                return Err(format!("duplicate comb mode index {}", mode.index));
+            }
+            if !(f64::from(mode.index) * self.spacing_hz).is_finite() {
+                return Err(format!(
+                    "comb mode {} frequency offset must be finite",
+                    mode.index
+                ));
+            }
+            if !mode.amplitude.is_finite() || mode.amplitude < 0.0 {
+                return Err(format!(
+                    "comb mode {} amplitude must be finite and nonnegative",
+                    mode.index
+                ));
+            }
+            if !mode.phase_rad.is_finite() {
+                return Err(format!("comb mode {} phase must be finite", mode.index));
+            }
+            has_nonzero_amplitude |= mode.amplitude > 0.0;
+        }
+        if !has_nonzero_amplitude {
+            return Err("comb must contain at least one nonzero amplitude".to_string());
+        }
+        Ok(())
+    }
+
+    /// Ordinary-frequency offsets from the reference tooth, in supplied mode order.
+    pub fn mode_offsets_hz(&self) -> Result<Vec<f64>, String> {
+        self.validate()?;
+        Ok(self
+            .modes
+            .iter()
+            .map(|mode| f64::from(mode.index) * self.spacing_hz)
+            .collect())
+    }
+
+    /// Normalized squared field amplitudes, in supplied mode order.
+    ///
+    /// The fractions sum to one up to floating-point rounding. Zero-amplitude
+    /// teeth are retained with zero power.
+    pub fn mode_power_fractions(&self) -> Result<Vec<f64>, String> {
+        Ok(self
+            .normalized_mode_amplitudes()?
+            .into_iter()
+            .map(|amplitude| amplitude * amplitude)
+            .collect())
+    }
+
+    /// Integrated powers of the discrete teeth, including zero-linewidth teeth.
+    pub fn mode_powers_milliwatts(&self) -> Result<Vec<f64>, String> {
+        Ok(self
+            .mode_power_fractions()?
+            .into_iter()
+            .map(|fraction| self.laser.power_milliwatts * fraction)
+            .collect())
+    }
+
+    /// Evaluates the averaged optical power spectrum in W/Hz at offsets in Hz.
+    ///
+    /// Each tooth is a unit-area Lorentzian with the embedded laser's FWHM,
+    /// weighted by its integrated mode power. Phases do not affect this spectrum.
+    /// Integrating over all offsets gives the total power in watts; a finite
+    /// sampling window is not renormalized. Samples may be negative, repeated,
+    /// unsorted, or empty, and are returned in the supplied sampling order.
+    ///
+    /// Returns an error for invalid inputs, a nonfinite evaluated density, or
+    /// zero linewidth: delta-function teeth have no finite pointwise density.
+    /// Use [`Self::mode_powers_milliwatts`] for the zero-linewidth case.
+    pub fn power_spectrum_watts_per_hz(&self, offsets_hz: &[f64]) -> Result<Vec<f64>, String> {
+        let powers = self.mode_powers_milliwatts()?;
+        let linewidth = self.laser.linewidth_fwhm_hz;
+        if linewidth == 0.0 {
+            return Err("a pointwise comb spectrum requires a positive linewidth".to_string());
+        }
+        if !offsets_hz.iter().all(|offset| offset.is_finite()) {
+            return Err("spectrum frequency offsets must be finite".to_string());
+        }
+
+        offsets_hz
+            .iter()
+            .map(|offset| {
+                let density: f64 = self
+                    .modes
+                    .iter()
+                    .zip(&powers)
+                    .map(|(mode, power)| {
+                        let distance = (offset - f64::from(mode.index) * self.spacing_hz).abs();
+                        let power_watts = power * 1e-3;
+                        // Use dimensionless ratios to avoid squaring very large
+                        // or small linewidths and frequency differences.
+                        if distance <= linewidth {
+                            let ratio = distance / linewidth;
+                            (power_watts * (2.0 / PI) / (1.0 + 4.0 * ratio * ratio)) / linewidth
+                        } else {
+                            let ratio = linewidth / distance;
+                            (power_watts * (2.0 / PI) * ratio / (4.0 + ratio * ratio)) / distance
+                        }
+                    })
+                    .sum();
+                if !density.is_finite() {
+                    return Err(format!(
+                        "comb spectrum density at offset {offset} Hz must be finite"
+                    ));
+                }
+                Ok(density)
+            })
+            .collect()
+    }
+
+    pub(crate) fn normalized_mode_amplitudes(&self) -> Result<Vec<f64>, String> {
+        self.validate()?;
+        let scale = self
+            .modes
+            .iter()
+            .map(|mode| mode.amplitude)
+            .fold(0.0, f64::max);
+        let mut amplitudes: Vec<_> = self
+            .modes
+            .iter()
+            .map(|mode| mode.amplitude / scale)
+            .collect();
+        let norm = amplitudes
+            .iter()
+            .map(|amplitude| amplitude * amplitude)
+            .sum::<f64>()
+            .sqrt();
+        for amplitude in &mut amplitudes {
+            *amplitude /= norm;
+        }
+        Ok(amplitudes)
     }
 }
 

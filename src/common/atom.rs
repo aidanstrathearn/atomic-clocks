@@ -1,7 +1,7 @@
 use std::f64::consts::{PI, TAU};
 
 use super::consts::{ATOMIC_MASS_KG, PLANCK_CONSTANT_J_S, SPEED_OF_LIGHT};
-use super::laser::Laser;
+use super::laser::{Comb, Laser};
 
 /// Saturation intensity in watts per square metre for a closed two-level transition.
 /// `angular_linewidth_per_s` is the population-decay linewidth Γ in radians per second.
@@ -30,6 +30,18 @@ pub struct Transition {
     pub clebsch_gordan_squared: f64,
 }
 
+/// Resonant coupling of one comb tooth to a selected two-level transition.
+#[derive(Clone, Copy, Debug)]
+pub struct CombRabiMode {
+    pub index: i32,
+    /// Ordinary-frequency offset from the reference tooth, in Hz; not a detuning.
+    pub offset_hz: f64,
+    /// Nonnegative resonant Rabi angular-frequency magnitude, in radians per second.
+    pub rabi_angular_frequency: f64,
+    /// Field phase at `t = 0`, in radians.
+    pub phase_rad: f64,
+}
+
 impl Transition {
     /// Transition wavelength in metres.
     pub fn wavelength_m(&self) -> f64 {
@@ -50,6 +62,36 @@ impl Transition {
         angular_linewidth_per_s
             * (laser.intensity_watts_per_m2() / (2.0 * saturation_intensity)).sqrt()
             * self.clebsch_gordan_squared.sqrt()
+    }
+
+    /// Per-tooth resonant Rabi couplings, including the component's CG factor.
+    ///
+    /// The total-power Rabi frequency is multiplied by each normalized field
+    /// amplitude, equivalently the square root of its power fraction. All modes
+    /// share the laser's waist and the selected polarization component. Supplied
+    /// mode order, indices, and phases are preserved, including zero-weight teeth.
+    ///
+    /// The caller supplies the reference detuning separately; wavelength and
+    /// optical linewidth do not enter these coupling magnitudes. The broadened
+    /// power spectrum is not used to calculate the coherent couplings.
+    pub fn comb_rabi_freqs(&self, comb: &Comb) -> Result<Vec<CombRabiMode>, String> {
+        self.validate()?;
+        let amplitudes = comb.normalized_mode_amplitudes()?;
+        let total_rabi = self.rabi_freq_radians_per_s(&comb.laser);
+        if !total_rabi.is_finite() {
+            return Err("comb Rabi angular frequency must be finite".to_string());
+        }
+        Ok(comb
+            .modes
+            .iter()
+            .zip(amplitudes)
+            .map(|(mode, amplitude)| CombRabiMode {
+                index: mode.index,
+                offset_hz: f64::from(mode.index) * comb.spacing_hz,
+                rabi_angular_frequency: total_rabi * amplitude,
+                phase_rad: mode.phase_rad,
+            })
+            .collect())
     }
 
     pub fn validate(&self) -> Result<(), String> {
